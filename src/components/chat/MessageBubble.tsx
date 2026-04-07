@@ -75,28 +75,38 @@ function generateFollowUps(text: string): string[] {
   const lower = text.toLowerCase();
   const suggestions: string[] = [];
 
-  if (lower.includes('order') && lower.includes('#')) {
+  // Check all patterns (not exclusive — collect from multiple)
+  if (lower.includes('order') && text.match(/#(\d+)/)) {
     const orderMatch = text.match(/#(\d+)/);
-    if (orderMatch) {
-      suggestions.push(`What products are in order #${orderMatch[1]}?`);
-      suggestions.push(`Where is order #${orderMatch[1]} being shipped?`);
-    }
-  } else if (lower.includes('product') && (lower.includes('$') || lower.includes('price'))) {
+    suggestions.push(`What products are in order #${orderMatch![1]}?`);
+    suggestions.push(`Where is order #${orderMatch![1]} being shipped?`);
+  }
+  if (lower.includes('product') && (lower.includes('$') || lower.includes('price') || lower.includes('catalog'))) {
     suggestions.push('Which products are low on inventory?');
     suggestions.push('Show me products not visible on the storefront');
-  } else if (lower.includes('promotion') || lower.includes('coupon') || lower.includes('discount')) {
+  }
+  if (lower.includes('promotion') || lower.includes('coupon') || lower.includes('discount')) {
     suggestions.push('Are any of these expired or inactive?');
     suggestions.push('How do I create a new promotion?');
-  } else if (lower.includes('shipping') || lower.includes('delivery')) {
+  }
+  if (lower.includes('shipping') || lower.includes('delivery')) {
     suggestions.push('How do I set up free shipping?');
-    suggestions.push('Show me my shipping zones');
-  } else if (lower.includes('customer')) {
+  }
+  if (lower.includes('customer')) {
     suggestions.push('Who are my most recent customers?');
-    suggestions.push('How do I set up customer groups?');
-  } else if (lower.includes('store') && (lower.includes('summary') || lower.includes('overview'))) {
-    suggestions.push('Show me recent orders');
-    suggestions.push('Do I have any active promotions?');
-    suggestions.push('How is my shipping configured?');
+  }
+
+  // Always provide fallback suggestions if nothing matched
+  if (suggestions.length === 0) {
+    if (lower.includes('store') || lower.includes('domain') || lower.includes('plan')) {
+      suggestions.push('Show me recent orders');
+      suggestions.push('Do I have any active promotions?');
+      suggestions.push('How is my shipping configured?');
+    } else {
+      suggestions.push('Tell me more');
+      suggestions.push('Show me recent orders');
+      suggestions.push('Do I have any active promotions?');
+    }
   }
 
   return suggestions.slice(0, 3);

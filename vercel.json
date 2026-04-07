@@ -1,0 +1,5 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "SKIP_ENV_VALIDATION=1 next build",
+  "framework": "nextjs"
+}

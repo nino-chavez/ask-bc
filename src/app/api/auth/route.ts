@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { exchangeCodeForToken, createSessionToken } from '@/lib/bigcommerce/auth';
 import { saveStoreCredentials, saveStoreUser } from '@/lib/store-credentials';
+import { registerAppExtensions } from '@/lib/bigcommerce/app-extensions';
 import { env } from '@/lib/env';
 
 /**
@@ -31,6 +32,11 @@ export async function GET(request: NextRequest) {
     });
 
     await saveStoreUser(storeHash, tokenData.user.id, tokenData.user.email, true);
+
+    // Register App Extensions (non-blocking — don't fail install if this errors)
+    registerAppExtensions(storeHash, tokenData.access_token, env.APP_ORIGIN).catch(
+      (err) => console.error('Failed to register app extensions:', err),
+    );
 
     const sessionToken = await createSessionToken({
       userId: tokenData.user.id,

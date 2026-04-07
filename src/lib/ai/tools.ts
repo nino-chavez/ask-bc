@@ -1,6 +1,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { createBcClient } from '@/lib/bigcommerce/client';
+import { searchBcDocs } from './doc-search';
 
 interface ToolContext {
   storeHash: string;
@@ -148,6 +149,58 @@ export function createBcTools(ctx: ToolContext) {
         order_id: z.number().describe('The order ID to get products for'),
       }),
       execute: async (input) => bc.getV2(`/orders/${input.order_id}/products`),
+    }),
+
+    get_product_variants: tool({
+      description: 'Get variants (SKUs, prices, inventory, options) for a specific product.',
+      inputSchema: z.object({
+        product_id: z.number().describe('The product ID'),
+        page: z.number().optional().describe('Page number (default 1)'),
+        limit: z.number().optional().describe('Results per page (default 50, max 250)'),
+      }),
+      execute: async (input) => {
+        const params = new URLSearchParams();
+        if (input.page) params.set('page', String(input.page));
+        if (input.limit) params.set('limit', String(input.limit));
+        const query = params.toString() ? `?${params}` : '';
+        return bc.get(`/catalog/products/${input.product_id}/variants${query}`);
+      },
+    }),
+
+    get_order_shipping_addresses: tool({
+      description: 'Get shipping address(es) for a specific order. Uses V2 API.',
+      inputSchema: z.object({
+        order_id: z.number().describe('The order ID'),
+      }),
+      execute: async (input) => bc.getV2(`/orders/${input.order_id}/shipping_addresses`),
+    }),
+
+    get_shipping_zones: tool({
+      description: 'Get shipping zones and their configured shipping methods. Uses V2 API.',
+      inputSchema: z.object({}),
+      execute: async () => bc.getV2('/shipping/zones'),
+    }),
+
+    get_tax_settings: tool({
+      description: 'Get the store\'s tax configuration including tax provider, document submission, and pricing settings.',
+      inputSchema: z.object({}),
+      execute: async () => bc.get('/tax/settings'),
+    }),
+
+    get_inventory: tool({
+      description: 'Get inventory levels across locations for a specific product.',
+      inputSchema: z.object({
+        product_id: z.number().describe('The product ID to check inventory for'),
+      }),
+      execute: async (input) => bc.get(`/inventory/items?product_id:in=${input.product_id}`),
+    }),
+
+    search_documentation: tool({
+      description: 'Search BigCommerce help documentation to answer "how do I..." questions about BigCommerce features, settings, and configuration. Use this when the merchant asks about how to do something in BigCommerce that you cannot answer from store data alone.',
+      inputSchema: z.object({
+        query: z.string().describe('The search query about BigCommerce features or configuration'),
+      }),
+      execute: async (input) => searchBcDocs(input.query),
     }),
   };
 }

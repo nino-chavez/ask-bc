@@ -4,8 +4,8 @@ import BigCommerceSDK from '@/components/BigCommerceSDK';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'App AI — BigCommerce Store Assistant',
-  description: 'AI-powered assistant for BigCommerce merchants',
+  title: 'Ask BC — BigCommerce Store Assistant',
+  description: 'AI-powered store assistant for BigCommerce merchants',
 };
 
 export default function RootLayout({

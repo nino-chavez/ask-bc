@@ -8,9 +8,10 @@ import MessageBubble from './MessageBubble';
 interface MessageListProps {
   messages: UIMessage[];
   isLoading?: boolean;
+  onFollowUp?: (text: string) => void;
 }
 
-export default function MessageList({ messages, isLoading }: MessageListProps) {
+export default function MessageList({ messages, isLoading, onFollowUp }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -39,8 +40,13 @@ export default function MessageList({ messages, isLoading }: MessageListProps) {
           </Text>
         </Box>
       )}
-      {messages.map((msg) => (
-        <MessageBubble key={msg.id} message={msg} />
+      {messages.map((msg, i) => (
+        <MessageBubble
+          key={msg.id}
+          message={msg}
+          isLatest={i === messages.length - 1 && !isLoading}
+          onFollowUp={onFollowUp}
+        />
       ))}
       {isLoading && messages[messages.length - 1]?.role === 'user' && (
         <Box style={{ display: 'flex', alignItems: 'flex-start', marginBottom: '1rem' }}>
@@ -51,9 +57,21 @@ export default function MessageList({ messages, isLoading }: MessageListProps) {
               background: '#f0f1f5',
               fontSize: '0.875rem',
               color: '#6b6f82',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
             }}
           >
+            <span style={{
+              display: 'inline-block',
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: '#3C64F4',
+              animation: 'pulse 1.5s ease-in-out infinite',
+            }} />
             Thinking...
+            <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }`}</style>
           </Box>
         </Box>
       )}

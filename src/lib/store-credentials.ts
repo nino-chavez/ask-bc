@@ -7,65 +7,101 @@ interface StoreCredentials {
   adminId: number;
 }
 
-const STORE_KEY_PREFIX = 'app-ai:store:';
-const USER_KEY_PREFIX = 'app-ai:user:';
+const STORE_KEY_PREFIX = 'ask-bc:store:';
+const USER_KEY_PREFIX = 'ask-bc:user:';
 
-/**
- * Save store credentials to Redis after OAuth install.
- */
-export async function saveStoreCredentials(creds: StoreCredentials): Promise<void> {
-  const redis = getRedis();
-  if (!redis) {
-    console.warn('Redis not configured — store credentials not persisted');
-    return;
-  }
-  await redis.set(`${STORE_KEY_PREFIX}${creds.storeHash}`, JSON.stringify(creds));
+// In-memory fallback for local dev (lost on restart, but survives hot reloads in dev)
+// In production, Redis is REQUIRED.
+const memoryStore = new Map<string, string>();
+
+// File-based fallback for local dev (survives full restarts)
+let fileStore: Record<string, string> | null = null;
+const CREDENTIALS_FILE = '.credentials.json';
+
+function getFileStore(): Record<string, string> {
+  if (fileStore) return fileStore;
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const filePath = path.join(process.cwd(), CREDENTIALS_FILE);
+    if (fs.existsSync(filePath)) {
+      fileStore = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      return fileStore!;
+    }
+  } catch { /* not available (e.g. edge runtime, vercel) */ }
+  fileStore = {};
+  return fileStore;
 }
 
-/**
- * Load store credentials from Redis.
- */
-export async function getStoreCredentials(storeHash: string): Promise<StoreCredentials | null> {
+function writeFileStore(data: Record<string, string>): void {
+  fileStore = data;
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    fs.writeFileSync(path.join(process.cwd(), CREDENTIALS_FILE), JSON.stringify(data, null, 2));
+  } catch { /* read-only filesystem — ok in production with Redis */ }
+}
+
+async function setKey(key: string, value: string): Promise<void> {
   const redis = getRedis();
-  if (!redis) return null;
+  if (redis) {
+    await redis.set(key, value);
+    return;
+  }
+  // Dev fallback: memory + file
+  memoryStore.set(key, value);
+  const store = getFileStore();
+  store[key] = value;
+  writeFileStore(store);
+}
 
-  const data = await redis.get<string>(`${STORE_KEY_PREFIX}${storeHash}`);
+async function getKey(key: string): Promise<string | null> {
+  const redis = getRedis();
+  if (redis) {
+    return redis.get<string>(key);
+  }
+  // Dev fallback: memory first, then file
+  return memoryStore.get(key) ?? getFileStore()[key] ?? null;
+}
+
+async function delKey(key: string): Promise<void> {
+  const redis = getRedis();
+  if (redis) {
+    await redis.del(key);
+    return;
+  }
+  memoryStore.delete(key);
+  const store = getFileStore();
+  delete store[key];
+  writeFileStore(store);
+}
+
+export async function saveStoreCredentials(creds: StoreCredentials): Promise<void> {
+  await setKey(`${STORE_KEY_PREFIX}${creds.storeHash}`, JSON.stringify(creds));
+}
+
+export async function getStoreCredentials(storeHash: string): Promise<StoreCredentials | null> {
+  const data = await getKey(`${STORE_KEY_PREFIX}${storeHash}`);
   if (!data) return null;
-
   return typeof data === 'string' ? JSON.parse(data) : data as unknown as StoreCredentials;
 }
 
-/**
- * Delete store credentials (on uninstall).
- */
 export async function deleteStoreCredentials(storeHash: string): Promise<void> {
-  const redis = getRedis();
-  if (!redis) return;
-  await redis.del(`${STORE_KEY_PREFIX}${storeHash}`);
+  await delKey(`${STORE_KEY_PREFIX}${storeHash}`);
 }
 
-/**
- * Save a store user record.
- */
 export async function saveStoreUser(
   storeHash: string,
   userId: number,
   email: string,
   isAdmin: boolean,
 ): Promise<void> {
-  const redis = getRedis();
-  if (!redis) return;
-  await redis.set(
+  await setKey(
     `${USER_KEY_PREFIX}${storeHash}:${userId}`,
     JSON.stringify({ storeHash, userId, email, isAdmin }),
   );
 }
 
-/**
- * Delete a store user record.
- */
 export async function deleteStoreUser(storeHash: string, userId: number): Promise<void> {
-  const redis = getRedis();
-  if (!redis) return;
-  await redis.del(`${USER_KEY_PREFIX}${storeHash}:${userId}`);
+  await delKey(`${USER_KEY_PREFIX}${storeHash}:${userId}`);
 }

@@ -1,13 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { jwtVerify, SignJWT } from 'jose';
 
-/**
- * Middleware handles the BigCommerce "load" callback.
- *
- * When a merchant opens the app in the BC control panel, BigCommerce sends
- * a GET to /api/load?signed_payload_jwt=... — we verify the JWT, create
- * an internal session cookie, and redirect to /stores/{storeHash}.
- */
 export async function middleware(request: NextRequest) {
   const { pathname, searchParams } = request.nextUrl;
 
@@ -50,7 +43,20 @@ export async function middleware(request: NextRequest) {
       .setExpirationTime('24h')
       .sign(new TextEncoder().encode(jwtKey));
 
-    const response = NextResponse.redirect(new URL(`/stores/${storeHash}`, appOrigin));
+    // Determine redirect path:
+    // For App Extension loads, the JWT `url` field contains the extension path
+    // with ${id} already substituted by BigCommerce.
+    // Normal loads have url like "https://store-xxx.mybigcommerce.com"
+    let redirectPath = `/stores/${storeHash}`;
+    const jwtUrl = payload.url as string | undefined;
+
+    if (jwtUrl && !jwtUrl.startsWith('http') && jwtUrl.includes('/extensions/')) {
+      redirectPath = jwtUrl;
+    }
+
+    // Also check all payload keys for any extension-related data
+    // and pass the full payload as a debug cookie (temporary)
+    const response = NextResponse.redirect(new URL(redirectPath, appOrigin));
 
     response.cookies.set('session-token', sessionToken, {
       httpOnly: true,
@@ -59,6 +65,18 @@ export async function middleware(request: NextRequest) {
       path: `/stores/${storeHash}`,
       maxAge: 60 * 60 * 24,
       partitioned: true,
+    });
+
+    // Debug: store the payload keys in a cookie we can inspect
+    const payloadKeys = Object.keys(payload).join(',');
+    response.cookies.set('debug-payload-keys', payloadKeys, {
+      path: `/stores/${storeHash}`,
+      maxAge: 60,
+    });
+    // Store the url field specifically
+    response.cookies.set('debug-payload-url', String(jwtUrl || 'none'), {
+      path: `/stores/${storeHash}`,
+      maxAge: 60,
     });
 
     return response;

@@ -137,6 +137,18 @@ export async function registerAppExtensions(
     });
   }
 
+  if (!registeredModels.has('CUSTOMERS')) {
+    extensions.push({
+      context: 'PANEL',
+      model: 'CUSTOMERS',
+      url: `/stores/${storeHash}/extensions/customers/\${id}`,
+      label: {
+        defaultValue: 'Ask BC',
+        locales: [{ value: 'Ask BC', localeCode: 'en' }],
+      },
+    });
+  }
+
   const results: AppExtension[] = [];
   for (const ext of extensions) {
     try {

@@ -26,7 +26,7 @@ When a merchant asks "how do I..." or asks about BigCommerce features/settings y
 `;
 
 interface ChatContext {
-  type: 'order' | 'product' | 'section';
+  type: 'order' | 'product' | 'customer' | 'section';
   id: string;
 }
 
@@ -41,6 +41,9 @@ export function buildSystemPrompt(context?: ChatContext): string {
       break;
     case 'product':
       contextBlock += `The merchant is currently viewing **Product #${context.id}**. Prioritize answering questions about this specific product, including its variants, inventory levels, pricing, and category assignments.`;
+      break;
+    case 'customer':
+      contextBlock += `The merchant is currently viewing **Customer #${context.id}**. Prioritize answering questions about this specific customer, including their order history, total spend, and account details.`;
       break;
     case 'section':
       contextBlock += `The merchant is currently in the **${context.id}** section of the BigCommerce admin.`;

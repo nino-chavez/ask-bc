@@ -16,7 +16,7 @@ import {
 } from '@/lib/chat-storage';
 
 export interface ChatContext {
-  type: 'order' | 'product' | 'section';
+  type: 'order' | 'product' | 'customer' | 'section';
   id: string;
 }
 
@@ -40,6 +40,13 @@ function getStarterPrompts(context?: ChatContext): string[] {
       `What category is product #${context.id} in?`,
     ];
   }
+  if (context?.type === 'customer') {
+    return [
+      `Show me customer #${context.id}'s details`,
+      `How many orders has customer #${context.id} placed?`,
+      `What's the total spend for customer #${context.id}?`,
+    ];
+  }
   return [
     'Give me a summary of my store',
     'Show me recent orders',
@@ -50,6 +57,7 @@ function getStarterPrompts(context?: ChatContext): string[] {
 function getTitle(context?: ChatContext): string {
   if (context?.type === 'order') return `Order #${context.id}`;
   if (context?.type === 'product') return `Product #${context.id}`;
+  if (context?.type === 'customer') return `Customer #${context.id}`;
   return 'Ask BC';
 }
 

@@ -19,13 +19,13 @@ import {
   ThumbDownAltIcon,
   ThumbDownOffAltIcon,
   ExpandMoreIcon,
-  ChevronRightIcon,
   AutoAwesomeIcon,
   InsertChartIcon,
   BaselineHelpIcon,
 } from '@bigcommerce/big-design-icons';
 import type { UIMessage } from 'ai';
 import ChatMarkdown from './ChatMarkdown';
+import { useTheme } from './ThemeContext';
 
 interface MessageBubbleProps {
   message: UIMessage;
@@ -118,7 +118,11 @@ export default function MessageBubble({ message, onFollowUp, isLatest }: Message
   const [feedback, setFeedback] = useState<'up' | 'down' | null>(null);
   const [showTools, setShowTools] = useState(false);
 
-  const toolCalls: { name: string; state: string }[] = [];
+  const { theme } = useTheme();
+  const { tokens, layout } = theme;
+  const ToolResultRenderer = theme.components.toolResultRenderer;
+
+  const toolCalls: { name: string; state: string; output?: unknown }[] = [];
   const textParts: string[] = [];
 
   for (const part of message.parts || []) {
@@ -126,8 +130,8 @@ export default function MessageBubble({ message, onFollowUp, isLatest }: Message
       textParts.push(part.text);
     } else if (part.type.startsWith('tool-')) {
       const toolName = part.type.replace(/^tool-/, '');
-      const toolPart = part as { type: string; state: string };
-      toolCalls.push({ name: toolName, state: toolPart.state });
+      const toolPart = part as { type: string; state: string; output?: unknown };
+      toolCalls.push({ name: toolName, state: toolPart.state, output: toolPart.output });
     }
   }
 
@@ -136,7 +140,38 @@ export default function MessageBubble({ message, onFollowUp, isLatest }: Message
 
   const completedTools = toolCalls.filter((t) => t.state === 'output-available');
   const pendingTools = toolCalls.filter((t) => t.state !== 'output-available');
+  const toolsWithOutput = completedTools.filter((t) => t.output);
   const followUps = isLatest && !isUser && text ? generateFollowUps(text) : [];
+
+  // Compute bubble styles from theme tokens
+  const bubbleStyle = isUser
+    ? {
+        background: tokens.colors.userBubble.bg,
+        color: tokens.colors.userBubble.text,
+        borderRadius: tokens.radius.userBubble,
+        ...(tokens.colors.userBubble.border
+          ? { border: `1px solid ${tokens.colors.userBubble.border}` }
+          : {}),
+        maxWidth: '85%',
+        padding: '0.75rem 1rem',
+        fontSize: tokens.typography.fontSize.sm,
+        lineHeight: '1.5',
+        wordBreak: 'break-word' as const,
+        whiteSpace: 'pre-wrap' as const,
+      }
+    : {
+        background: tokens.colors.assistantBubble.bg,
+        color: tokens.colors.assistantBubble.text,
+        borderRadius: tokens.radius.assistantBubble,
+        ...(tokens.colors.assistantBubble.border
+          ? { border: `1px solid ${tokens.colors.assistantBubble.border}` }
+          : {}),
+        maxWidth: '85%',
+        padding: tokens.colors.assistantBubble.bg === 'transparent' ? '0.25rem 0' : '0.75rem 1rem',
+        fontSize: tokens.typography.fontSize.sm,
+        lineHeight: '1.5',
+        wordBreak: 'break-word' as const,
+      };
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(text);
@@ -150,12 +185,12 @@ export default function MessageBubble({ message, onFollowUp, isLatest }: Message
         display: 'flex',
         flexDirection: 'column',
         alignItems: isUser ? 'flex-end' : 'flex-start',
-        marginBottom: '1rem',
+        marginBottom: tokens.spacing.lg,
       }}
     >
       {/* Pending tool calls — animated */}
       {pendingTools.length > 0 && (
-        <Box style={{ marginBottom: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+        <Box style={{ marginBottom: tokens.spacing.sm, display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
           {pendingTools.map((tc, i) => (
             <Box
               key={i}
@@ -163,8 +198,8 @@ export default function MessageBubble({ message, onFollowUp, isLatest }: Message
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.375rem',
-                fontSize: '0.75rem',
-                color: '#6b6f82',
+                fontSize: tokens.typography.fontSize.xs,
+                color: tokens.colors.text.muted,
               }}
             >
               <span style={{
@@ -172,10 +207,10 @@ export default function MessageBubble({ message, onFollowUp, isLatest }: Message
                 width: '6px',
                 height: '6px',
                 borderRadius: '50%',
-                background: '#3C64F4',
+                background: tokens.colors.primary,
                 animation: 'pulse 1.5s ease-in-out infinite',
               }} />
-              <span style={{ display: 'flex', alignItems: 'center', color: '#8b8fa3' }}>
+              <span style={{ display: 'flex', alignItems: 'center', color: tokens.colors.text.muted }}>
                 {TOOL_ICONS[tc.name] || <SearchIcon style={iconStyle} />}
               </span>
               Looking up {TOOL_LABELS[tc.name] || tc.name}...
@@ -185,42 +220,42 @@ export default function MessageBubble({ message, onFollowUp, isLatest }: Message
         </Box>
       )}
 
-      {/* Completed tool calls — collapsible */}
-      {completedTools.length > 0 && (
+      {/* Completed tool calls — collapsible (inline mode only) */}
+      {layout.toolResultPosition === 'inline' && completedTools.length > 0 && (
         <Box
           onClick={() => setShowTools(!showTools)}
           style={{
-            marginBottom: '0.5rem',
+            marginBottom: tokens.spacing.sm,
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
             gap: '0.25rem',
-            fontSize: '0.75rem',
-            color: '#8b8fa3',
+            fontSize: tokens.typography.fontSize.xs,
+            color: tokens.colors.text.muted,
             userSelect: 'none',
           }}
         >
-          <span style={{ display: 'flex', alignItems: 'center', transition: 'transform 0.15s', transform: showTools ? 'rotate(0)' : 'rotate(-90deg)' }}>
+          <span style={{ display: 'flex', alignItems: 'center', transition: tokens.transitions.fast, transform: showTools ? 'rotate(0)' : 'rotate(-90deg)' }}>
             <ExpandMoreIcon style={{ width: '14px', height: '14px' }} />
           </span>
           Used {completedTools.length} tool{completedTools.length > 1 ? 's' : ''}
         </Box>
       )}
-      {showTools && completedTools.length > 0 && (
+      {layout.toolResultPosition === 'inline' && showTools && completedTools.length > 0 && (
         <Box style={{
-          marginBottom: '0.5rem',
+          marginBottom: tokens.spacing.sm,
           padding: '0.375rem 0.5rem',
-          background: '#f8f9fb',
-          borderRadius: '6px',
-          border: '1px solid #e8e9ef',
-          fontSize: '0.75rem',
+          background: tokens.colors.surface,
+          borderRadius: tokens.radius.md,
+          border: `1px solid ${tokens.colors.border.subtle}`,
+          fontSize: tokens.typography.fontSize.xs,
           display: 'flex',
           flexDirection: 'column',
           gap: '0.375rem',
         }}>
           {completedTools.map((tc, i) => (
-            <Box key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', color: '#6b6f82' }}>
-              <span style={{ display: 'flex', alignItems: 'center', color: '#8b8fa3' }}>
+            <Box key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', color: tokens.colors.text.muted }}>
+              <span style={{ display: 'flex', alignItems: 'center', color: tokens.colors.text.muted }}>
                 {TOOL_ICONS[tc.name] || <SearchIcon style={iconStyle} />}
               </span>
               {TOOL_LABELS[tc.name] || tc.name}
@@ -231,20 +266,19 @@ export default function MessageBubble({ message, onFollowUp, isLatest }: Message
 
       {/* Message content */}
       {text && (
-        <Box
-          style={{
-            maxWidth: '85%',
-            padding: '0.75rem 1rem',
-            borderRadius: isUser ? '1rem 1rem 0.25rem 1rem' : '1rem 1rem 1rem 0.25rem',
-            background: isUser ? '#3C64F4' : '#f0f1f5',
-            color: isUser ? '#fff' : '#313440',
-            fontSize: '0.875rem',
-            lineHeight: '1.5',
-            wordBreak: 'break-word',
-            ...(isUser ? { whiteSpace: 'pre-wrap' as const } : {}),
-          }}
-        >
+        <Box style={bubbleStyle}>
           {isUser ? text : <ChatMarkdown content={text} />}
+        </Box>
+      )}
+
+      {/* Rich tool results for grid-below mode */}
+      {layout.toolResultPosition === 'grid-below' && toolsWithOutput.length > 0 && (
+        <Box style={{ marginTop: tokens.spacing.sm, width: '100%', maxWidth: '85%' }}>
+          {toolsWithOutput.map((tc, i) => (
+            <Box key={i} style={{ marginBottom: tokens.spacing.sm }}>
+              <ToolResultRenderer toolName={tc.name} output={tc.output} />
+            </Box>
+          ))}
         </Box>
       )}
 
@@ -256,7 +290,7 @@ export default function MessageBubble({ message, onFollowUp, isLatest }: Message
           gap: '0.125rem',
           marginTop: '0.375rem',
           opacity: 0.5,
-          transition: 'opacity 0.15s',
+          transition: `opacity ${tokens.transitions.fast}`,
         }}
           onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => { (e.currentTarget as HTMLDivElement).style.opacity = '1'; }}
           onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => { (e.currentTarget as HTMLDivElement).style.opacity = '0.5'; }}
@@ -268,12 +302,12 @@ export default function MessageBubble({ message, onFollowUp, isLatest }: Message
               border: 'none',
               cursor: 'pointer',
               padding: '0.25rem',
-              borderRadius: '4px',
+              borderRadius: tokens.radius.sm,
               display: 'flex',
               alignItems: 'center',
               gap: '0.25rem',
-              fontSize: '0.6875rem',
-              color: copied ? '#16a34a' : '#8b8fa3',
+              fontSize: tokens.typography.fontSize.xs,
+              color: copied ? tokens.colors.success : tokens.colors.text.muted,
             }}
             title="Copy response"
           >
@@ -283,7 +317,7 @@ export default function MessageBubble({ message, onFollowUp, isLatest }: Message
             }
           </button>
 
-          <span style={{ color: '#e8e9ef', margin: '0 0.125rem' }}>|</span>
+          <span style={{ color: tokens.colors.border.subtle, margin: '0 0.125rem' }}>|</span>
 
           <button
             onClick={() => setFeedback(feedback === 'up' ? null : 'up')}
@@ -292,10 +326,10 @@ export default function MessageBubble({ message, onFollowUp, isLatest }: Message
               border: 'none',
               cursor: 'pointer',
               padding: '0.25rem',
-              borderRadius: '4px',
+              borderRadius: tokens.radius.sm,
               display: 'flex',
               alignItems: 'center',
-              color: feedback === 'up' ? '#3C64F4' : '#8b8fa3',
+              color: feedback === 'up' ? tokens.colors.primary : tokens.colors.text.muted,
             }}
             title="Good response"
           >
@@ -312,10 +346,10 @@ export default function MessageBubble({ message, onFollowUp, isLatest }: Message
               border: 'none',
               cursor: 'pointer',
               padding: '0.25rem',
-              borderRadius: '4px',
+              borderRadius: tokens.radius.sm,
               display: 'flex',
               alignItems: 'center',
-              color: feedback === 'down' ? '#dc2626' : '#8b8fa3',
+              color: feedback === 'down' ? tokens.colors.error : tokens.colors.text.muted,
             }}
             title="Bad response"
           >
@@ -333,7 +367,7 @@ export default function MessageBubble({ message, onFollowUp, isLatest }: Message
           display: 'flex',
           flexWrap: 'wrap',
           gap: '0.375rem',
-          marginTop: '0.5rem',
+          marginTop: tokens.spacing.sm,
           maxWidth: '85%',
         }}>
           {followUps.map((suggestion) => (
@@ -341,23 +375,23 @@ export default function MessageBubble({ message, onFollowUp, isLatest }: Message
               key={suggestion}
               onClick={() => onFollowUp(suggestion)}
               style={{
-                background: '#fff',
-                border: '1px solid #d9dce9',
-                borderRadius: '999px',
+                background: tokens.colors.surfaceRaised,
+                border: `1px solid ${tokens.colors.border.default}`,
+                borderRadius: tokens.radius.full,
                 padding: '0.375rem 0.75rem',
-                fontSize: '0.75rem',
-                color: '#525566',
+                fontSize: tokens.typography.fontSize.xs,
+                color: tokens.colors.text.secondary,
                 cursor: 'pointer',
-                transition: 'border-color 0.15s, color 0.15s',
+                transition: `border-color ${tokens.transitions.fast}, color ${tokens.transitions.fast}`,
                 whiteSpace: 'nowrap',
               }}
               onMouseEnter={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.borderColor = '#3C64F4';
-                (e.currentTarget as HTMLButtonElement).style.color = '#3C64F4';
+                (e.currentTarget as HTMLButtonElement).style.borderColor = tokens.colors.primary;
+                (e.currentTarget as HTMLButtonElement).style.color = tokens.colors.primary;
               }}
               onMouseLeave={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.borderColor = '#d9dce9';
-                (e.currentTarget as HTMLButtonElement).style.color = '#525566';
+                (e.currentTarget as HTMLButtonElement).style.borderColor = tokens.colors.border.default;
+                (e.currentTarget as HTMLButtonElement).style.color = tokens.colors.text.secondary;
               }}
             >
               {suggestion}

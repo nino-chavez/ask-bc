@@ -17,6 +17,7 @@
     "@bigcommerce/big-design-icons": "^1.2.1",
     "@bigcommerce/big-design-theme": "^1.1.1",
     "@t3-oss/env-nextjs": "^0.11.1",
+    "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.37.0",
     "ai": "^6.0.0",
     "jose": "^5.9.6",

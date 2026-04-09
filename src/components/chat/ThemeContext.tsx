@@ -48,6 +48,10 @@ export function ChatThemeProvider({ storeHash, children }: ThemeProviderProps) {
     }
 
     loadTheme();
+
+    // Lazy-register any missing App Extensions (fire-and-forget)
+    fetch(`/stores/${storeHash}/api/extensions`, { method: 'POST' }).catch(() => {});
+
     return () => { cancelled = true; };
   }, [storeHash]);
 

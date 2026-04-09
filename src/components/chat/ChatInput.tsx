@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback } from 'react';
 import { Box, Button, Flex, FlexItem } from '@bigcommerce/big-design';
 import { SendIcon } from '@bigcommerce/big-design-icons';
+import { useTheme } from './ThemeContext';
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -11,6 +12,8 @@ interface ChatInputProps {
 }
 
 export default function ChatInput({ onSend, disabled, placeholder }: ChatInputProps) {
+  const { theme } = useTheme();
+  const { tokens } = theme;
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -42,7 +45,7 @@ export default function ChatInput({ onSend, disabled, placeholder }: ChatInputPr
   return (
     <Box
       padding="small"
-      style={{ borderTop: '1px solid #d9dce9', background: '#fff' }}
+      style={{ borderTop: `1px solid ${tokens.colors.border.default}`, background: tokens.colors.surfaceRaised }}
     >
       <Flex alignItems="flex-end" style={{ gap: '0.5rem' }}>
         <FlexItem flexGrow={1}>
@@ -58,20 +61,22 @@ export default function ChatInput({ onSend, disabled, placeholder }: ChatInputPr
             style={{
               width: '100%',
               resize: 'none',
-              border: '1px solid #d9dce9',
-              borderRadius: '6px',
+              border: `1px solid ${tokens.colors.border.default}`,
+              borderRadius: tokens.radius.md,
               padding: '0.625rem 0.75rem',
-              fontSize: '0.875rem',
-              lineHeight: '1.5',
-              fontFamily: 'inherit',
+              fontSize: tokens.typography.fontSize.base,
+              lineHeight: tokens.typography.lineHeight.normal,
+              fontFamily: tokens.typography.fontFamily,
               outline: 'none',
               maxHeight: '200px',
               overflow: 'auto',
               boxSizing: 'border-box',
-              transition: 'border-color 0.15s',
+              transition: `border-color ${tokens.transitions.fast}`,
+              background: tokens.colors.surfaceRaised,
+              color: tokens.colors.text.primary,
             }}
-            onFocus={(e) => { e.currentTarget.style.borderColor = '#3C64F4'; }}
-            onBlur={(e) => { e.currentTarget.style.borderColor = '#d9dce9'; }}
+            onFocus={(e) => { e.currentTarget.style.borderColor = tokens.colors.primary; }}
+            onBlur={(e) => { e.currentTarget.style.borderColor = tokens.colors.border.default; }}
           />
         </FlexItem>
         <FlexItem>

@@ -1,43 +1,10 @@
 'use client';
 
 import type { ReactNode } from 'react';
+import { useTheme } from './ThemeContext';
 
 interface ChatMarkdownProps {
   content: string;
-}
-
-function processInline(text: string): ReactNode[] {
-  const parts: ReactNode[] = [];
-  const regex = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`)/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-  let key = 0;
-
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index));
-    }
-    if (match[2]) {
-      parts.push(<strong key={key++} style={{ fontWeight: 600, color: '#313440' }}>{match[2]}</strong>);
-    } else if (match[3]) {
-      parts.push(<em key={key++}>{match[3]}</em>);
-    } else if (match[4]) {
-      parts.push(
-        <code key={key++} style={{
-          background: '#e8e9ef',
-          borderRadius: '3px',
-          padding: '0.125rem 0.3rem',
-          fontSize: '0.8125rem',
-          fontFamily: 'monospace',
-        }}>{match[4]}</code>
-      );
-    }
-    lastIndex = match.index + match[0].length;
-  }
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex));
-  }
-  return parts.length > 0 ? parts : [text];
 }
 
 type Block =
@@ -155,15 +122,52 @@ function parseBlocks(content: string): Block[] {
 }
 
 export default function ChatMarkdown({ content }: ChatMarkdownProps) {
+  const { theme } = useTheme();
+  const { tokens } = theme;
+
+  function processInline(text: string): ReactNode[] {
+    const parts: ReactNode[] = [];
+    const regex = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`)/g;
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+    let key = 0;
+
+    while ((match = regex.exec(text)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push(text.slice(lastIndex, match.index));
+      }
+      if (match[2]) {
+        parts.push(<strong key={key++} style={{ fontWeight: 600, color: tokens.colors.text.primary }}>{match[2]}</strong>);
+      } else if (match[3]) {
+        parts.push(<em key={key++}>{match[3]}</em>);
+      } else if (match[4]) {
+        parts.push(
+          <code key={key++} style={{
+            background: tokens.colors.border.subtle,
+            borderRadius: '3px',
+            padding: '0.125rem 0.3rem',
+            fontSize: tokens.typography.fontSize.sm,
+            fontFamily: 'monospace',
+          }}>{match[4]}</code>
+        );
+      }
+      lastIndex = match.index + match[0].length;
+    }
+    if (lastIndex < text.length) {
+      parts.push(text.slice(lastIndex));
+    }
+    return parts.length > 0 ? parts : [text];
+  }
+
   const blocks = parseBlocks(content);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
       {blocks.map((block, i) => {
         if (block.type === 'heading') {
-          const fontSize = block.level <= 2 ? '0.9375rem' : '0.875rem';
+          const fontSize = block.level <= 2 ? tokens.typography.fontSize.lg : tokens.typography.fontSize.base;
           return (
-            <div key={i} style={{ fontWeight: 600, fontSize, color: '#313440', marginTop: '0.25rem' }}>
+            <div key={i} style={{ fontWeight: 600, fontSize, color: tokens.colors.text.primary, marginTop: '0.25rem' }}>
               {processInline(block.text)}
             </div>
           );
@@ -172,11 +176,11 @@ export default function ChatMarkdown({ content }: ChatMarkdownProps) {
         if (block.type === 'code') {
           return (
             <pre key={i} style={{
-              background: '#1e1e2e',
-              color: '#cdd6f4',
-              borderRadius: '6px',
+              background: tokens.colors.code.bg,
+              color: tokens.colors.code.text,
+              borderRadius: tokens.radius.md,
               padding: '0.75rem',
-              fontSize: '0.8125rem',
+              fontSize: tokens.typography.fontSize.sm,
               fontFamily: 'monospace',
               overflow: 'auto',
               whiteSpace: 'pre-wrap',
@@ -213,17 +217,17 @@ export default function ChatMarkdown({ content }: ChatMarkdownProps) {
               <table style={{
                 borderCollapse: 'collapse',
                 width: '100%',
-                fontSize: '0.8125rem',
+                fontSize: tokens.typography.fontSize.sm,
               }}>
                 <thead>
                   <tr>
                     {block.headers.map((h, j) => (
                       <th key={j} style={{
-                        borderBottom: '2px solid #d9dce9',
+                        borderBottom: `2px solid ${tokens.colors.border.default}`,
                         padding: '0.375rem 0.5rem',
                         textAlign: 'left',
                         fontWeight: 600,
-                        color: '#313440',
+                        color: tokens.colors.text.primary,
                       }}>{processInline(h)}</th>
                     ))}
                   </tr>
@@ -233,7 +237,7 @@ export default function ChatMarkdown({ content }: ChatMarkdownProps) {
                     <tr key={j}>
                       {row.map((cell, k) => (
                         <td key={k} style={{
-                          borderBottom: '1px solid #e8e9ef',
+                          borderBottom: `1px solid ${tokens.colors.border.subtle}`,
                           padding: '0.375rem 0.5rem',
                         }}>{processInline(cell)}</td>
                       ))}

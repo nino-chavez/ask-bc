@@ -42,7 +42,7 @@ export default function ChatPanel({
   const prevCountRef = useRef(0);
   const hasRestored = useRef(false);
 
-  const { messages, sendMessage, status, setMessages } = useChat({
+  const { messages, sendMessage, status, setMessages, error } = useChat({
     id: sessionId,
     transport: new DefaultChatTransport({
       api: `/stores/${storeHash}/api/chat`,
@@ -139,6 +139,31 @@ export default function ChatPanel({
 
       {(messages.length > 0 || isLoading) && (
         <MessageList messages={messages} isLoading={isLoading} onFollowUp={handleSend} />
+      )}
+
+      {error && (
+        <Box style={{
+          ...contentStyle,
+          padding: `${tokens.spacing.sm} ${tokens.spacing.lg}`,
+        }}>
+          <Box style={{
+            padding: '0.625rem 0.75rem',
+            borderRadius: tokens.radius.md,
+            background: '#FEF2F2',
+            border: '1px solid #FECACA',
+            fontSize: tokens.typography.fontSize.sm,
+            color: '#991B1B',
+            display: 'flex',
+            alignItems: 'center',
+            gap: tokens.spacing.sm,
+          }}>
+            {error.message?.includes('429') || error.message?.includes('Too many')
+              ? 'Too many requests — please wait a moment before sending another message.'
+              : error.message?.includes('401') || error.message?.includes('Unauthorized')
+                ? 'Your session has expired. Please reload the page to continue.'
+                : 'Something went wrong. Please try again.'}
+          </Box>
+        </Box>
       )}
 
       <Box style={contentStyle}>

@@ -116,6 +116,17 @@ export default function MessageBubble({ message, onFollowUp, isLatest }: Message
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState<'up' | 'down' | null>(null);
+
+  const sendFeedback = (rating: 'up' | 'down') => {
+    // Extract storeHash from URL: /stores/[storeHash]/...
+    const match = window.location.pathname.match(/\/stores\/([^/]+)/);
+    if (!match) return;
+    fetch(`/stores/${match[1]}/api/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messageId: message.id, rating }),
+    }).catch(() => {});
+  };
   const [showTools, setShowTools] = useState(false);
 
   const { theme } = useTheme();
@@ -320,7 +331,11 @@ export default function MessageBubble({ message, onFollowUp, isLatest }: Message
           <span style={{ color: tokens.colors.border.subtle, margin: '0 0.125rem' }}>|</span>
 
           <button
-            onClick={() => setFeedback(feedback === 'up' ? null : 'up')}
+            onClick={() => {
+              const next = feedback === 'up' ? null : 'up' as const;
+              setFeedback(next);
+              if (next) sendFeedback(next);
+            }}
             style={{
               background: 'none',
               border: 'none',
@@ -340,7 +355,11 @@ export default function MessageBubble({ message, onFollowUp, isLatest }: Message
           </button>
 
           <button
-            onClick={() => setFeedback(feedback === 'down' ? null : 'down')}
+            onClick={() => {
+              const next = feedback === 'down' ? null : 'down' as const;
+              setFeedback(next);
+              if (next) sendFeedback(next);
+            }}
             style={{
               background: 'none',
               border: 'none',

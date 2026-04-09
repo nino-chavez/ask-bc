@@ -5,6 +5,8 @@ import type { UIMessage } from 'ai';
 import { Box, H1, Button, Text, Flex, FlexItem } from '@bigcommerce/big-design';
 import { AddIcon, RestoreIcon, DeleteIcon, CloseIcon } from '@bigcommerce/big-design-icons';
 import ChatPanel from './ChatPanel';
+import ThemeSelector from './ThemeSelector';
+import { ChatThemeProvider, useTheme } from './ThemeContext';
 import {
   getSession,
   listSessions,
@@ -55,11 +57,15 @@ function generateSessionId(): string {
   return `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export default function ChatPage({ storeHash, context }: ChatPageProps) {
+function ChatPageInner({ storeHash, context }: ChatPageProps) {
+  const { theme } = useTheme();
+  const { tokens, layout } = theme;
+
   const [sessionId, setSessionId] = useState(() => generateSessionId());
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [restoredMessages, setRestoredMessages] = useState<UIMessage[] | undefined>();
+  const [railHovered, setRailHovered] = useState(false);
   const isPanel = !!context;
 
   const refreshSessions = useCallback(async () => {
@@ -104,23 +110,91 @@ export default function ChatPage({ storeHash, context }: ChatPageProps) {
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
-  return (
-    <Flex style={{ height: '100vh', overflow: 'hidden' }}>
-      {/* History sidebar */}
-      {showHistory && !isPanel && (
+  const sessionListContent = (
+    <>
+      {sessions.length === 0 && (
+        <Text color="secondary60" style={{ fontSize: '0.8125rem', padding: '0.5rem', textAlign: 'center' }}>
+          No past conversations.
+        </Text>
+      )}
+      {sessions.map((s) => (
+        <Box
+          key={s.id}
+          style={{
+            padding: '0.5rem 0.625rem',
+            borderRadius: tokens.radius.md,
+            cursor: 'pointer',
+            background: s.id === sessionId ? tokens.colors.surface : 'transparent',
+            marginBottom: '0.25rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '0.375rem',
+          }}
+          onClick={() => handleLoadSession(s.id)}
+        >
+          <Box style={{ flex: 1, minWidth: 0 }}>
+            <Text
+              style={{
+                fontSize: '0.8125rem',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                display: 'block',
+              }}
+            >
+              {s.title}
+            </Text>
+            <Text color="secondary60" style={{ fontSize: '0.6875rem' }}>
+              {formatTime(s.updatedAt)}
+            </Text>
+          </Box>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleDeleteSession(s.id);
+            }}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '0.25rem',
+              borderRadius: '4px',
+              color: tokens.colors.text.muted,
+              display: 'flex',
+              opacity: 0.5,
+              flexShrink: 0,
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = '1'; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.5'; }}
+            title="Delete conversation"
+          >
+            <DeleteIcon style={{ width: '14px', height: '14px' }} />
+          </button>
+        </Box>
+      ))}
+    </>
+  );
+
+  const renderSidebar = () => {
+    if (isPanel) return null;
+
+    if (layout.sidebarStyle === 'panel') {
+      if (!showHistory) return null;
+      return (
         <FlexItem
           style={{
             width: '260px',
-            borderRight: '1px solid #d9dce9',
+            borderRight: `1px solid ${tokens.colors.border.default}`,
             display: 'flex',
             flexDirection: 'column',
-            background: '#fafbfc',
+            background: tokens.colors.background,
           }}
         >
           <Box
             padding="small"
             style={{
-              borderBottom: '1px solid #d9dce9',
+              borderBottom: `1px solid ${tokens.colors.border.default}`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
@@ -134,73 +208,107 @@ export default function ChatPage({ storeHash, context }: ChatPageProps) {
             />
           </Box>
           <Box style={{ flex: 1, overflow: 'auto', padding: '0.5rem' }}>
-            {sessions.length === 0 && (
-              <Text color="secondary60" style={{ fontSize: '0.8125rem', padding: '0.5rem', textAlign: 'center' }}>
-                No past conversations.
-              </Text>
-            )}
-            {sessions.map((s) => (
-              <Box
-                key={s.id}
-                style={{
-                  padding: '0.5rem 0.625rem',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  background: s.id === sessionId ? '#e9ebf5' : 'transparent',
-                  marginBottom: '0.25rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '0.375rem',
-                }}
-                onClick={() => handleLoadSession(s.id)}
-              >
-                <Box style={{ flex: 1, minWidth: 0 }}>
-                  <Text
-                    style={{
-                      fontSize: '0.8125rem',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      display: 'block',
-                    }}
-                  >
-                    {s.title}
-                  </Text>
-                  <Text
-                    color="secondary60"
-                    style={{ fontSize: '0.6875rem' }}
-                  >
-                    {formatTime(s.updatedAt)}
-                  </Text>
-                </Box>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDeleteSession(s.id);
-                  }}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    padding: '0.25rem',
-                    borderRadius: '4px',
-                    color: '#8b8fa3',
-                    display: 'flex',
-                    opacity: 0.5,
-                    flexShrink: 0,
-                  }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = '1'; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.5'; }}
-                  title="Delete conversation"
-                >
-                  <DeleteIcon style={{ width: '14px', height: '14px' }} />
-                </button>
-              </Box>
-            ))}
+            {sessionListContent}
           </Box>
         </FlexItem>
-      )}
+      );
+    }
+
+    if (layout.sidebarStyle === 'drawer') {
+      if (!showHistory) return null;
+      return (
+        <>
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(0,0,0,0.2)',
+              zIndex: 99,
+            }}
+            onClick={() => setShowHistory(false)}
+          />
+          <div
+            style={{
+              position: 'fixed',
+              left: 0,
+              top: 0,
+              bottom: 0,
+              zIndex: 100,
+              width: '260px',
+              borderRight: `1px solid ${tokens.colors.border.default}`,
+              display: 'flex',
+              flexDirection: 'column',
+              background: tokens.colors.background,
+            }}
+          >
+            <Box
+              padding="small"
+              style={{
+                borderBottom: `1px solid ${tokens.colors.border.default}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <Text style={{ fontWeight: 600, fontSize: '0.875rem' }}>Chat History</Text>
+              <Button
+                variant="subtle"
+                iconOnly={<CloseIcon />}
+                onClick={() => setShowHistory(false)}
+              />
+            </Box>
+            <Box style={{ flex: 1, overflow: 'auto', padding: '0.5rem' }}>
+              {sessionListContent}
+            </Box>
+          </div>
+        </>
+      );
+    }
+
+    if (layout.sidebarStyle === 'rail') {
+      const expandedWidth = '260px';
+      const currentWidth = railHovered ? expandedWidth : layout.sidebarWidth;
+      return (
+        <FlexItem
+          onMouseEnter={() => setRailHovered(true)}
+          onMouseLeave={() => setRailHovered(false)}
+          style={{
+            width: currentWidth,
+            borderRight: `1px solid ${tokens.colors.border.default}`,
+            display: 'flex',
+            flexDirection: 'column',
+            background: tokens.colors.background,
+            overflow: 'hidden',
+            transition: `width ${tokens.transitions.normal}`,
+          }}
+        >
+          <Box
+            padding="small"
+            style={{
+              borderBottom: `1px solid ${tokens.colors.border.default}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <Text style={{ fontWeight: 600, fontSize: '0.875rem', opacity: railHovered ? 1 : 0, transition: `opacity ${tokens.transitions.normal}` }}>
+              Chat History
+            </Text>
+          </Box>
+          <Box style={{ flex: 1, overflow: 'auto', padding: '0.5rem' }}>
+            {railHovered ? sessionListContent : null}
+          </Box>
+        </FlexItem>
+      );
+    }
+
+    return null;
+  };
+
+  return (
+    <Flex style={{ height: '100vh', overflow: 'hidden', background: tokens.colors.background }}>
+      {renderSidebar()}
 
       {/* Main chat area */}
       <FlexItem
@@ -214,14 +322,15 @@ export default function ChatPage({ storeHash, context }: ChatPageProps) {
         <Box
           padding={isPanel ? 'small' : 'medium'}
           style={{
-            borderBottom: '1px solid #d9dce9',
+            borderBottom: `1px solid ${tokens.colors.border.default}`,
+            background: tokens.colors.surfaceRaised,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
           }}
         >
           <Flex alignItems="center" style={{ gap: '0.5rem' }}>
-            {!isPanel && (
+            {!isPanel && layout.sidebarStyle !== 'rail' && (
               <Button
                 variant="subtle"
                 iconOnly={<RestoreIcon />}
@@ -229,18 +338,21 @@ export default function ChatPage({ storeHash, context }: ChatPageProps) {
                 title="Chat history"
               />
             )}
-            <H1 style={{ margin: 0, fontSize: isPanel ? '1rem' : '1.25rem' }}>
+            <H1 style={{ margin: 0, fontSize: isPanel ? '1rem' : tokens.typography.fontSize.xl }}>
               {getTitle(context)}
             </H1>
           </Flex>
           {!isPanel && (
-            <Button
-              variant="secondary"
-              onClick={handleNewConversation}
-              iconLeft={<AddIcon />}
-            >
-              New Chat
-            </Button>
+            <Flex alignItems="center" style={{ gap: '0.5rem' }}>
+              <ThemeSelector />
+              <Button
+                variant="secondary"
+                onClick={handleNewConversation}
+                iconLeft={<AddIcon />}
+              >
+                New Chat
+              </Button>
+            </Flex>
           )}
         </Box>
 
@@ -256,5 +368,13 @@ export default function ChatPage({ storeHash, context }: ChatPageProps) {
         />
       </FlexItem>
     </Flex>
+  );
+}
+
+export default function ChatPage({ storeHash, context }: ChatPageProps) {
+  return (
+    <ChatThemeProvider storeHash={storeHash}>
+      <ChatPageInner storeHash={storeHash} context={context} />
+    </ChatThemeProvider>
   );
 }

@@ -7,6 +7,7 @@ import type { UIMessage } from 'ai';
 import { Box, Text } from '@bigcommerce/big-design';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
+import { useTheme } from './ThemeContext';
 import {
   saveSession,
   serializeMessages,
@@ -31,6 +32,13 @@ export default function ChatPanel({
   starterPrompts,
   onSessionSaved,
 }: ChatPanelProps) {
+  const { theme } = useTheme();
+  const { tokens, layout } = theme;
+
+  const contentStyle: React.CSSProperties = layout.contentAlign === 'center'
+    ? { maxWidth: layout.contentMaxWidth, margin: '0 auto', width: '100%' }
+    : {};
+
   const prevCountRef = useRef(0);
   const hasRestored = useRef(false);
 
@@ -86,7 +94,10 @@ export default function ChatPanel({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            padding: '1rem',
+            padding: tokens.spacing.lg,
+            background: tokens.colors.background,
+            marginBottom: tokens.spacing.lg,
+            ...contentStyle,
           }}
         >
           <Box style={{ maxWidth: '400px', width: '100%', textAlign: 'center' }}>
@@ -102,20 +113,20 @@ export default function ChatPanel({
                   onClick={() => handleSend(prompt)}
                   style={{
                     padding: '0.625rem 0.75rem',
-                    border: '1px solid #d9dce9',
-                    borderRadius: '6px',
+                    border: `1px solid ${tokens.colors.border.default}`,
+                    borderRadius: tokens.radius.md,
                     cursor: 'pointer',
-                    fontSize: '0.875rem',
-                    color: '#525566',
+                    fontSize: tokens.typography.fontSize.base,
+                    color: tokens.colors.text.secondary,
                     textAlign: 'left',
-                    background: '#fff',
+                    background: tokens.colors.surfaceRaised,
                     transition: 'border-color 0.15s',
                   }}
                   onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => {
-                    (e.currentTarget as HTMLDivElement).style.borderColor = '#3C64F4';
+                    (e.currentTarget as HTMLDivElement).style.borderColor = tokens.colors.primary;
                   }}
                   onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => {
-                    (e.currentTarget as HTMLDivElement).style.borderColor = '#d9dce9';
+                    (e.currentTarget as HTMLDivElement).style.borderColor = tokens.colors.border.default;
                   }}
                 >
                   {prompt}
@@ -130,11 +141,13 @@ export default function ChatPanel({
         <MessageList messages={messages} isLoading={isLoading} onFollowUp={handleSend} />
       )}
 
-      <ChatInput
-        onSend={handleSend}
-        disabled={isLoading}
-        placeholder={context ? `Ask about this ${context.type}...` : 'Ask about your store...'}
-      />
+      <Box style={contentStyle}>
+        <ChatInput
+          onSend={handleSend}
+          disabled={isLoading}
+          placeholder={context ? `Ask about this ${context.type}...` : 'Ask about your store...'}
+        />
+      </Box>
     </>
   );
 }

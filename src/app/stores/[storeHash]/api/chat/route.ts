@@ -1,9 +1,10 @@
 import { streamText, convertToModelMessages, validateUIMessages, stepCountIs } from 'ai';
 import { NextRequest, NextResponse } from 'next/server';
 import { authorize } from '@/lib/bigcommerce/auth';
-import { getModel } from '@/lib/ai/models';
+import { getModel, routeModel } from '@/lib/ai/models';
 import { createBcTools } from '@/lib/ai/tools';
 import { buildSystemPrompt } from '@/lib/ai/system-prompt';
+import { getRateLimiter } from '@/lib/rate-limit';
 
 const MAX_MESSAGES_PER_REQUEST = 50;
 const MAX_TOOL_ROUNDS = 10;
@@ -27,6 +28,15 @@ export async function POST(
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  // Rate limit: 20 requests per 60s per store
+  const rl = getRateLimiter();
+  if (rl) {
+    const { success } = await rl.limit(storeHash);
+    if (!success) {
+      return NextResponse.json({ error: 'Too many requests. Please wait a moment.' }, { status: 429 });
+    }
+  }
+
   let body: { messages?: unknown; context?: { type?: string; id?: string } };
   try {
     body = await request.json();
@@ -44,11 +54,11 @@ export async function POST(
   }
 
   // Validate context if provided
-  let chatContext: { type: 'order' | 'product' | 'section'; id: string } | undefined;
+  let chatContext: { type: 'order' | 'product' | 'customer' | 'section'; id: string } | undefined;
   if (context?.type && context?.id) {
-    const validTypes = ['order', 'product', 'section'];
+    const validTypes = ['order', 'product', 'customer', 'section'];
     if (validTypes.includes(context.type)) {
-      chatContext = { type: context.type as 'order' | 'product' | 'section', id: context.id };
+      chatContext = { type: context.type as 'order' | 'product' | 'customer' | 'section', id: context.id };
     }
   }
 
@@ -60,8 +70,20 @@ export async function POST(
     accessToken: session.accessToken,
   });
 
+  // Route to Haiku (fast) or Sonnet (smart) based on the latest user message
+  const lastUserMsg = [...modelMessages].reverse().find((m) => m.role === 'user');
+  const lastUserText = lastUserMsg?.content
+    ? (typeof lastUserMsg.content === 'string'
+        ? lastUserMsg.content
+        : lastUserMsg.content
+            .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+            .map((p) => p.text)
+            .join(' '))
+    : '';
+  const tier = routeModel(lastUserText);
+
   const result = streamText({
-    model: getModel('chat'),
+    model: getModel(tier),
     system: buildSystemPrompt(chatContext),
     messages: modelMessages,
     tools,

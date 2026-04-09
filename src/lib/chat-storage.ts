@@ -1,14 +1,25 @@
 import type { UIMessage } from 'ai';
 
 const DB_NAME = 'ask-bc-chat';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE_NAME = 'sessions';
 
-/** Simplified message format that survives JSON/IndexedDB round-trip. */
+interface StoredToolCall {
+  toolName: string;
+  toolCallId: string;
+  state: string;
+  input?: unknown;
+  output?: unknown;
+  errorText?: string;
+}
+
+/** Message format that survives JSON/IndexedDB round-trip. */
 interface StoredMessage {
   id: string;
   role: 'user' | 'assistant';
   text: string;
+  toolCalls?: StoredToolCall[];
+  /** @deprecated Use toolCalls instead. Kept for reading old sessions. */
   toolNames?: string[];
 }
 
@@ -42,13 +53,28 @@ function openDB(): Promise<IDBDatabase> {
 /** Extract serializable data from UIMessage. */
 function toStoredMessage(msg: UIMessage): StoredMessage {
   const textParts: string[] = [];
-  const toolNames: string[] = [];
+  const toolCalls: StoredToolCall[] = [];
 
   for (const part of msg.parts || []) {
     if (part.type === 'text' && part.text.trim()) {
       textParts.push(part.text);
     } else if (part.type.startsWith('tool-')) {
-      toolNames.push(part.type.replace(/^tool-/, ''));
+      const toolPart = part as {
+        type: string;
+        toolCallId: string;
+        state: string;
+        input?: unknown;
+        output?: unknown;
+        errorText?: string;
+      };
+      toolCalls.push({
+        toolName: part.type.replace(/^tool-/, ''),
+        toolCallId: toolPart.toolCallId,
+        state: toolPart.state,
+        input: toolPart.input,
+        output: toolPart.output,
+        errorText: toolPart.errorText,
+      });
     }
   }
 
@@ -56,7 +82,7 @@ function toStoredMessage(msg: UIMessage): StoredMessage {
     id: msg.id,
     role: msg.role as 'user' | 'assistant',
     text: textParts.join(''),
-    toolNames: toolNames.length > 0 ? toolNames : undefined,
+    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
   };
 }
 
@@ -64,8 +90,20 @@ function toStoredMessage(msg: UIMessage): StoredMessage {
 function toUIMessage(stored: StoredMessage): UIMessage {
   const parts: UIMessage['parts'] = [];
 
-  // Add tool parts first (they appear before text in the UI)
-  if (stored.toolNames) {
+  // Restore full tool parts (new format) or fall back to legacy toolNames
+  if (stored.toolCalls) {
+    for (const tc of stored.toolCalls) {
+      parts.push({
+        type: `tool-${tc.toolName}`,
+        toolCallId: tc.toolCallId,
+        state: tc.state,
+        input: tc.input,
+        output: tc.output,
+        ...(tc.errorText ? { errorText: tc.errorText } : {}),
+      } as UIMessage['parts'][number]);
+    }
+  } else if (stored.toolNames) {
+    // Legacy format: only tool names available
     for (const name of stored.toolNames) {
       parts.push({
         type: `tool-${name}`,
@@ -137,7 +175,7 @@ export function serializeMessages(messages: UIMessage[]): StoredMessage[] {
   return messages
     .filter((m) => m.role === 'user' || m.role === 'assistant')
     .map(toStoredMessage)
-    .filter((m) => m.text); // skip empty messages
+    .filter((m) => m.text || m.toolCalls); // skip empty messages
 }
 
 /** Convert stored messages back to UIMessages for restoring. */

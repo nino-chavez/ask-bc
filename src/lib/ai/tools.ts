@@ -1,7 +1,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { createBcClient } from '@/lib/bigcommerce/client';
-import { searchBcDocs } from './doc-search';
+import { searchBcDocsWithContent } from './doc-search';
 
 interface ToolContext {
   storeHash: string;
@@ -200,7 +200,7 @@ export function createBcTools(ctx: ToolContext) {
       inputSchema: z.object({
         query: z.string().describe('The search query about BigCommerce features or configuration'),
       }),
-      execute: async (input) => searchBcDocs(input.query),
+      execute: async (input) => searchBcDocsWithContent(input.query),
     }),
   };
 }

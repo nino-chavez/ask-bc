@@ -10,6 +10,7 @@ interface DocResult {
   url: string;
   topic: string;
   relevance: number;
+  content?: string;
 }
 
 const BC_DOCS: DocEntry[] = [
@@ -128,4 +129,68 @@ export function searchBcDocs(query: string): DocResult[] {
     .sort((a, b) => b.relevance - a.relevance)
     .slice(0, 3)
     .map(({ title, url, topic, relevance }) => ({ title, url, topic, relevance }));
+}
+
+/**
+ * Fetch article content from a BigCommerce support URL.
+ * Extracts text from the HTML body, strips tags, and truncates to stay within token limits.
+ */
+async function fetchArticleContent(url: string, maxChars = 3000): Promise<string | undefined> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'AskBC/1.0' },
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) return undefined;
+
+    const html = await res.text();
+
+    // Extract main article content — BC support uses <article> or .article-content
+    const articleMatch = html.match(/<article[^>]*>([\s\S]*?)<\/article>/i)
+      || html.match(/<div[^>]*class="[^"]*article[^"]*"[^>]*>([\s\S]*?)<\/div>/i)
+      || html.match(/<main[^>]*>([\s\S]*?)<\/main>/i);
+
+    const rawHtml = articleMatch?.[1] || html;
+
+    // Strip HTML tags, decode entities, normalize whitespace
+    const text = rawHtml
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&nbsp;/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return text.length > maxChars ? text.slice(0, maxChars) + '...' : text;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Search BC docs and fetch content for the top results.
+ * Returns articles with their content included when available.
+ */
+export async function searchBcDocsWithContent(query: string): Promise<DocResult[]> {
+  const results = searchBcDocs(query);
+
+  // Fetch content for top results in parallel
+  const withContent = await Promise.all(
+    results.map(async (result) => {
+      const content = await fetchArticleContent(result.url);
+      return { ...result, content };
+    })
+  );
+
+  return withContent;
 }

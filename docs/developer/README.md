@@ -1,5 +1,10 @@
 # Developer Guide
 
+> **New:** The agent runtime is migrating from the Next.js tool loop to a dedicated Cloudflare Worker running Project Think + Codemode. The migration is active — this guide still reflects the Vercel-side development workflow (OAuth, iframe UI, App Extensions), which is unchanged. For the new Worker:
+>
+> - Architecture decision: [ADR-001](../architecture/decisions/001-codemode-agent-runtime.md)
+> - Operational reference: [Agent Runtime guide](./agent-runtime.md)
+
 ## Quick Start
 
 ```bash

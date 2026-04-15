@@ -1,0 +1,37 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ask-bc-agent-runtime",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-03-01",
+  "compatibility_flags": ["nodejs_compat", "experimental"],
+  "workers_dev": true,
+  "observability": {
+    "enabled": true
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ASK_BC",
+        "class_name": "AskBC"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["AskBC"]
+    }
+  ],
+  "worker_loaders": [
+    {
+      "binding": "LOADER"
+    }
+  ],
+  "vars": {
+    "BC_API_BASE": "https://api.bigcommerce.com"
+  }
+  // Secrets set via wrangler secret put:
+  //   ANTHROPIC_API_KEY
+  //   BC_STORE_HASH
+  //   BC_ACCESS_TOKEN
+}

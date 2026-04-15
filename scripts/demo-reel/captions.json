@@ -1,0 +1,68 @@
+{
+  "voice": "ash",
+  "model": "gpt-4o-mini-tts",
+  "instructions": "Speak confidently and conversationally, like a senior product manager giving a live technical demo to an engineering audience. Clear enunciation, steady medium pace, warm but precise. Light inflection on key terms. No hype, no salesiness, no pauses between sentences. Flow naturally from one thought to the next.",
+  "defaultHoldSeconds": 0.4,
+  "scenes": [
+    {
+      "image": "demo-01-empty-state.png",
+      "title": "Ask BC — an assistant inside the admin",
+      "caption": "This is Ask BC, a single-click marketplace app that lives inside the BigCommerce control panel. It gives merchants a chat interface over their actual store data — orders, products, customers, promotions, inventory, and the BigCommerce help docs — without leaving the admin, without opening a report, and without writing a query."
+    },
+    {
+      "image": "demo-02-first-question.png",
+      "title": "A real question, answered from real data",
+      "caption": "A merchant types a plain-English question. 'What are my top-selling products this month?' Ask BC doesn't search a knowledge base or hallucinate a guess. It reaches into the store's live REST API, pulls orders and line items, aggregates them, and formats the result the way a merchant actually wants to read it."
+    },
+    {
+      "image": "demo-03-tool-loop.png",
+      "title": "Claude picks the tools",
+      "caption": "Under the hood, Claude has fifteen BigCommerce tools available — get orders, get products, get customers, get inventory, search docs, and so on. The model decides which tools to call, in what order, with what arguments. The AI SDK runs the loop automatically: call a tool, feed the result back, decide whether to call another, until the question is answered."
+    },
+    {
+      "image": "demo-04-table-response.png",
+      "title": "Formatted like a merchant wants it",
+      "caption": "The answer streams back as markdown — a clean table with product name, units sold, and revenue, sorted descending. Not a JSON dump, not a wall of text. Ask BC knows its audience is a store operator, not a developer, so the response renders the way a human would write it up in a weekly review."
+    },
+    {
+      "image": "demo-05-followup-chips.png",
+      "title": "Follow-up suggestions keep the conversation moving",
+      "caption": "Below every response, Ask BC surfaces clickable follow-ups — 'show me the slowest movers,' 'break this down by channel,' 'compare to last month.' Each chip is a one-click next question, generated from the context of the answer you just got. The merchant stays in flow instead of hunting for what to ask next."
+    },
+    {
+      "image": "demo-06-chained-tools.png",
+      "title": "Harder questions chain tools together",
+      "caption": "Now a compound question. 'Which customers haven't ordered in ninety days and used to buy from the outdoor category?' That's two tool calls chained — get customers, then filter against order history and category. Claude plans the sequence, the SDK enforces a step limit, and the result comes back as a ranked list the merchant can act on."
+    },
+    {
+      "image": "demo-07-orders-extension.png",
+      "title": "Context-aware on the Orders page",
+      "caption": "Ask BC also registers App Extensions. From any order detail page, a contextual panel opens already knowing which order you're looking at. 'Why is this order delayed?' The system prompt injects the order ID, Claude calls get order and get shipping, and the answer is specific to that single order — no copy-paste, no context-switching."
+    },
+    {
+      "image": "demo-08-products-extension.png",
+      "title": "Context-aware on the Products page",
+      "caption": "Same pattern on Products. Open any product, the panel appears, and you can ask 'how is this SKU performing across channels' or 'what's the current inventory by warehouse.' The extension is just another chat surface, but the context is pinned — every question is implicitly scoped to the entity in front of you."
+    },
+    {
+      "image": "demo-09-docs-answer.png",
+      "title": "How-to questions, with real doc links",
+      "caption": "Ask BC isn't only for store data. Ask it 'how do I set up free shipping on orders over fifty dollars,' and a sixteenth tool — search documentation — queries the BigCommerce help corpus, cites the relevant pages, and returns step-by-step instructions with links. One assistant for 'what is my store doing' and 'how do I make my store do something.'"
+    },
+    {
+      "image": "demo-10-history.png",
+      "title": "Chat history persists across sessions",
+      "caption": "Every conversation is saved to IndexedDB in the browser, so the merchant can close the panel, come back tomorrow, and pick up exactly where they left off. Threads are per-store, per-user, and never leave the device. The server only sees the current turn — history is local by design."
+    },
+    {
+      "image": "demo-11-architecture.png",
+      "title": "The architecture is small on purpose",
+      "caption": "Zooming out: Next.js 15 on Vercel, the AI SDK handling the tool loop, Claude Haiku four-point-five as the model, Upstash Redis for store credentials, and BigDesign components rendering inside the admin iframe. Fifteen tools, one system prompt, one chat route. No vector database, no fine-tune, no agent framework — the SDK's native tool calling is enough."
+    },
+    {
+      "image": "demo-12-close.png",
+      "title": "Your store, answering its own questions",
+      "caption": "That's Ask BC. A chat surface over the store's own APIs, a context-aware panel on every entity page, and a doc search for how-to questions — all from a single marketplace install. The merchant doesn't learn a new tool. They just ask the question they would have asked a human operator, and the store answers."
+    }
+  ]
+}

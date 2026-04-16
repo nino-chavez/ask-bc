@@ -1,20 +1,27 @@
 'use client';
 
-import { useParams, useSearchParams } from 'next/navigation';
-import ChatPage, { type ChatContext } from '@/components/chat/ChatPage';
-
-const VALID_SECTIONS = ['orders', 'products', 'customers', 'marketing', 'settings'];
+import { useParams } from 'next/navigation';
+import WorkerChatPanel from '@/components/chat/WorkerChatPanel';
 
 export default function StoreDashboard() {
   const params = useParams();
-  const searchParams = useSearchParams();
   const storeHash = params.storeHash as string;
 
-  let context: ChatContext | undefined;
-  const section = searchParams.get('context');
-  if (section && VALID_SECTIONS.includes(section)) {
-    context = { type: 'section', id: section };
-  }
-
-  return <ChatPage storeHash={storeHash} context={context} />;
+  return (
+    <div style={{ height: '100vh' }}>
+      <WorkerChatPanel
+        storeHash={storeHash}
+        title="Ask BC"
+        subtitle="AI Store Assistant"
+        suggestions={[
+          'Give me a KPI summary of my store',
+          'Show me my 5 most expensive products',
+          'What are my recent orders?',
+          'Which products are low on inventory?',
+          'How is my shipping configured?',
+          'How do I set up free shipping on orders over $50?',
+        ]}
+      />
+    </div>
+  );
 }

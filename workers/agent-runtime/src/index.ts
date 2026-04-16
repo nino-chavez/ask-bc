@@ -5,6 +5,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { tool, type LanguageModel } from "ai";
 import { z } from "zod";
 import { createBcClients } from "./bc/client.js";
+import { renderBlockCatalog } from "./blocks.js";
 
 interface Env {
   ASK_BC: DurableObjectNamespace;
@@ -210,6 +211,31 @@ function buildBcTools(env: Env) {
         ),
     }),
 
+    getOrderCount: tool({
+      description:
+        "Count orders matching filters WITHOUT fetching them. Returns {count: number} plus per-status breakdowns. Use this for 'how many orders' questions instead of fetching and counting.",
+      inputSchema: z.object({
+        min_date_created: z.string().optional(),
+        max_date_created: z.string().optional(),
+        status_id: z.number().int().optional(),
+      }),
+      execute: async ({ min_date_created, max_date_created, status_id }) => {
+        const query: Record<string, unknown> = {};
+        if (min_date_created) query.min_date_created = min_date_created;
+        if (max_date_created) query.max_date_created = max_date_created;
+        if (status_id !== undefined) query.status_id = status_id;
+        return u(
+          await bc.orders.GET("/orders/count", {
+            params: {
+              query: query as never,
+              header: { Accept: "application/json", "Content-Type": "application/json" },
+            },
+          }),
+          "GET /v2/orders/count",
+        );
+      },
+    }),
+
     getOrderShippingAddresses: tool({
       description: "Shipping addresses for an order (supports multi-address orders).",
       inputSchema: z.object({ order_id: z.number().int().positive() }),
@@ -357,6 +383,28 @@ BigCommerce has TWO API versions (V2 and V3) with DIFFERENT response shapes. Get
 - Guest checkouts have \`customer_id: 0\` — filter these out when analyzing customer-order relationships.
 - Empty results return an empty body that the client patches to \`[]\` — so \`orders.length === 0\` is the correct empty check.
 
+## COUNTING — don't fetch everything just to count
+
+**For V3 endpoints** (products, customers, categories, etc.) — call with \`limit: 1\` and read the count from \`meta.pagination.total\`:
+\`\`\`ts
+const { meta } = await codemode.getProducts({ limit: 1 });
+const totalProducts = meta.pagination.total;  // correct total count
+\`\`\`
+
+**For V2 orders** — call the dedicated count endpoint (NOT \`getOrders({limit:1})\`, which returns 1 order, not a count):
+\`\`\`ts
+const { count } = await codemode.getOrderCount();  // all orders
+const { count: pending } = await codemode.getOrderCount({ status_id: 11 });  // filtered
+\`\`\`
+
+**Never** do \`(await codemode.getOrders({limit: 1})).length\` to count orders — that returns 1 regardless of how many orders exist.
+
+## SORT FIELDS — strict enums
+
+Sort parameters are strict enums per endpoint. Only use the values listed in each tool's description. If you're not sure, omit sort entirely and handle ordering in memory after the fetch. Common mistakes:
+- \`getProducts\` does NOT accept \`total_sold\` as a sort — that field doesn't exist in the V3 products API
+- \`getOrders\` uses colon-separated sort values like \`"date_created:desc"\`, not dot notation
+
 ## ORDER STATUS IDS (V2)
 
 Common values for \`getOrders({ status_id })\`:
@@ -403,7 +451,9 @@ for (const o of orders) {
 // ... aggregate as needed
 \`\`\`
 
-Be concise. Merchants want answers, not explanations of your process.`;
+${renderBlockCatalog()}
+
+Be concise. Merchants want answers, not explanations of your process. Prefer blocks over markdown tables — they render as real UI components in the merchant's chat.`;
 
 // ─── The Agent ─────────────────────────────────────────────────────
 

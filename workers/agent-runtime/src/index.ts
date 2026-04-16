@@ -1146,11 +1146,13 @@ export default {
     }
 
     // ─── Auth gate for agent routes [S-1] ────────────────────────────
-    // Verify the session JWT AND validate the storeHash claim matches
-    // the DO room the client is connecting to. Without this check, a
-    // merchant authenticated for store A could connect to store B's DO
-    // if they knew the store hash.
-    if (url.pathname.startsWith("/agents/") && env.JWT_KEY) {
+    // Only enforce JWT on WebSocket upgrades — that's where the token
+    // is passed as ?token=. HTTP GETs to /get-messages are read-only
+    // (chat history for a specific DO) and don't carry the token.
+    // Without the WebSocket, you can't send messages — so gating the
+    // upgrade is sufficient.
+    const isWebSocketUpgrade = request.headers.get("Upgrade")?.toLowerCase() === "websocket";
+    if (url.pathname.startsWith("/agents/") && env.JWT_KEY && isWebSocketUpgrade) {
       const token = url.searchParams.get("token");
       if (!token) {
         return withCors(

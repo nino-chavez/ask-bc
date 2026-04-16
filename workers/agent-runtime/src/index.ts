@@ -380,149 +380,162 @@ function buildReadTools(env: Env, bc: ReturnType<typeof createBcClients>) {
   };
 }
 
-// ─── Write tools — TOP-LEVEL, execute on call ─────────────────────
+// ─── Write tools — TWO-TURN PATTERN [S-3] ─────────────────────────
 //
-// NOT inside the codemode sandbox. The model calls them directly.
-// Gated by system prompt rules (only write when merchant explicitly
-// asks). Pre-execution approval via needsApproval is not yet functional
-// in the AI SDK + Think stack — see ADR-001 and security audit.
-// TODO: implement two-turn write pattern (S-3) for production.
+// NOT inside the codemode sandbox. Each write tool has a `confirmed`
+// boolean. On the first call (confirmed=false), the tool returns a
+// preview without executing. On the second call after user confirmation
+// (confirmed=true), the tool executes and logs to the audit table.
+//
+// The system prompt teaches the model: call with confirmed=false first,
+// show the preview, then only call with confirmed=true after the
+// merchant explicitly confirms in the chat.
 
-function buildWriteTools(env: Env, bc: ReturnType<typeof createBcClients>) {
+function buildWriteTools(env: Env, bc: ReturnType<typeof createBcClients>, auditLog: (entry: AuditEntry) => void) {
   const u = unwrap;
 
   return {
     createCoupon: tool({
       description:
-        "Create a new coupon code in the BigCommerce store. The merchant MUST explicitly ask for a coupon creation — do not create coupons proactively. Coupons are manual codes (e.g. 'SUMMER25') the shopper enters at checkout, distinct from automatic promotions. By default the coupon applies to the whole store; pass applies_to to restrict to specific products or categories.",
+        "Create a new coupon code. FIRST call with confirmed=false to preview. Show the preview to the merchant. ONLY call with confirmed=true after the merchant explicitly confirms. Coupons are manual codes the shopper enters at checkout.",
       inputSchema: z.object({
-        name: z.string().describe("Internal name for the coupon"),
-        code: z.string().describe("The code customers enter at checkout (e.g. 'SUMMER25')"),
-        type: z.enum([
-          "per_item_discount",
-          "per_total_discount",
-          "shipping_discount",
-          "free_shipping",
-          "promotion",
-          "percentage_discount",
-        ]),
-        amount: z.string().describe("Discount amount as a string (e.g. '25' for 25% or $25)"),
-        min_purchase: z.string().optional().describe("Minimum cart subtotal to apply"),
+        confirmed: z.boolean().default(false).describe("false = preview only, true = execute the write"),
+        name: z.string(),
+        code: z.string().describe("The code customers enter at checkout"),
+        type: z.enum(["per_item_discount", "per_total_discount", "shipping_discount", "free_shipping", "promotion", "percentage_discount"]),
+        amount: z.string().describe("Discount amount as a string"),
+        min_purchase: z.string().optional(),
         expires: z.string().optional().describe("ISO 8601 expiry date"),
         enabled: z.boolean().default(true),
         max_uses: z.number().int().optional(),
         max_uses_per_customer: z.number().int().optional(),
-        applies_to: z
-          .object({
-            entity: z.enum(["products", "categories"]),
-            ids: z.array(z.number().int()),
-          })
-          .optional()
-          .describe("Restrict coupon to specific products or categories. Omit for store-wide."),
+        applies_to: z.object({ entity: z.enum(["products", "categories"]), ids: z.array(z.number().int()) }).optional(),
       }),
-      // Write tools execute immediately. The system prompt is the gate —
-      // the model only calls writes when the merchant explicitly asks.
-      // A pre-execution approval gate via needsApproval is not yet
-      // functional in the AI SDK + Think stack (see ADR-001 notes).
-      // needsApproval: true,  // TODO: re-enable when SDK supports it
       execute: async (input) => {
-        // BC V2 requires applies_to. Default to "whole store" via
-        // categories: [0] when the caller omits it.
-        const body = {
-          ...input,
-          applies_to: input.applies_to ?? { entity: "categories" as const, ids: [0] },
-        };
-        console.log("[createCoupon] body:", JSON.stringify(body));
-        const result = await bc.marketing.POST("/coupons", {
-          params: { header: { Accept: "application/json", "Content-Type": "application/json" } },
-          body: body as never,
-        });
-        console.log("[createCoupon] result data:", JSON.stringify(result.data));
-        console.log("[createCoupon] result error:", JSON.stringify(result.error));
-        return u(result, "POST /v2/coupons");
+        const { confirmed, ...args } = input;
+        const body = { ...args, applies_to: args.applies_to ?? { entity: "categories" as const, ids: [0] } };
+
+        if (!confirmed) {
+          return { status: "preview", message: "This will create a coupon. Ask the merchant to confirm before calling with confirmed=true.", operation: "createCoupon", args: body };
+        }
+
+        const result = u(
+          await bc.marketing.POST("/coupons", {
+            params: { header: { Accept: "application/json", "Content-Type": "application/json" } },
+            body: body as never,
+          }),
+          "POST /v2/coupons",
+        );
+        auditLog({ tool: "createCoupon", input: body, result, timestamp: new Date().toISOString() });
+        return result;
       },
     }),
 
     updateProductInventory: tool({
       description:
-        "Adjust the inventory level for a single product. Use for restocks, corrections, or recounts. This sets the absolute inventory — to ADD units, read the current level first and pass current + delta.",
+        "Adjust inventory level. FIRST call with confirmed=false to preview, then confirmed=true after merchant confirms.",
       inputSchema: z.object({
+        confirmed: z.boolean().default(false),
         product_id: z.number().int().positive(),
-        inventory_level: z.number().int().min(0).describe("New absolute inventory level"),
+        inventory_level: z.number().int().min(0),
       }),
-      // Write tools execute immediately. The system prompt is the gate —
-      // the model only calls writes when the merchant explicitly asks.
-      // A pre-execution approval gate via needsApproval is not yet
-      // functional in the AI SDK + Think stack (see ADR-001 notes).
-      // needsApproval: true,  // TODO: re-enable when SDK supports it
-      execute: async ({ product_id, inventory_level }) =>
-        u(
+      execute: async ({ confirmed, product_id, inventory_level }) => {
+        if (!confirmed) {
+          return { status: "preview", message: `Will set product ${product_id} inventory to ${inventory_level}. Ask the merchant to confirm.`, operation: "updateProductInventory", args: { product_id, inventory_level } };
+        }
+        const result = u(
           await bc.products.PUT("/catalog/products/{product_id}", {
-            params: {
-              path: { product_id },
-              header: { Accept: "application/json", "Content-Type": "application/json" },
-            },
+            params: { path: { product_id }, header: { Accept: "application/json", "Content-Type": "application/json" } },
             body: { inventory_level } as never,
           }),
           `PUT /catalog/products/${product_id} (inventory)`,
-        ),
+        );
+        auditLog({ tool: "updateProductInventory", input: { product_id, inventory_level }, result, timestamp: new Date().toISOString() });
+        return result;
+      },
     }),
 
     setProductVisibility: tool({
       description:
-        "Publish or unpublish a product on the storefront by toggling is_visible. Use for seasonal removes, out-of-stock hiding, or soft-deletes. The product is preserved in the catalog either way.",
+        "Publish or unpublish a product. FIRST call with confirmed=false to preview, then confirmed=true after merchant confirms.",
       inputSchema: z.object({
+        confirmed: z.boolean().default(false),
         product_id: z.number().int().positive(),
         is_visible: z.boolean(),
       }),
-      // Write tools execute immediately. The system prompt is the gate —
-      // the model only calls writes when the merchant explicitly asks.
-      // A pre-execution approval gate via needsApproval is not yet
-      // functional in the AI SDK + Think stack (see ADR-001 notes).
-      // needsApproval: true,  // TODO: re-enable when SDK supports it
-      execute: async ({ product_id, is_visible }) =>
-        u(
+      execute: async ({ confirmed, product_id, is_visible }) => {
+        if (!confirmed) {
+          return { status: "preview", message: `Will ${is_visible ? "publish" : "unpublish"} product ${product_id}. Ask the merchant to confirm.`, operation: "setProductVisibility", args: { product_id, is_visible } };
+        }
+        const result = u(
           await bc.products.PUT("/catalog/products/{product_id}", {
-            params: {
-              path: { product_id },
-              header: { Accept: "application/json", "Content-Type": "application/json" },
-            },
+            params: { path: { product_id }, header: { Accept: "application/json", "Content-Type": "application/json" } },
             body: { is_visible } as never,
           }),
           `PUT /catalog/products/${product_id} (visibility)`,
-        ),
+        );
+        auditLog({ tool: "setProductVisibility", input: { product_id, is_visible }, result, timestamp: new Date().toISOString() });
+        return result;
+      },
     }),
 
     updateProductPrice: tool({
       description:
-        "Update a product's base price and/or sale_price. Use for markdowns, promotional pricing, or cost-driven increases. Both fields are optional — pass only what changes.",
+        "Update a product's price. FIRST call with confirmed=false to preview, then confirmed=true after merchant confirms.",
       inputSchema: z.object({
+        confirmed: z.boolean().default(false),
         product_id: z.number().int().positive(),
-        price: z.number().optional().describe("Base retail price"),
-        sale_price: z.number().optional().describe("Sale/promotional price. Set to 0 to clear."),
+        price: z.number().optional(),
+        sale_price: z.number().optional(),
       }),
-      // Write tools execute immediately. The system prompt is the gate —
-      // the model only calls writes when the merchant explicitly asks.
-      // A pre-execution approval gate via needsApproval is not yet
-      // functional in the AI SDK + Think stack (see ADR-001 notes).
-      // needsApproval: true,  // TODO: re-enable when SDK supports it
-      execute: async ({ product_id, price, sale_price }) => {
+      execute: async ({ confirmed, product_id, price, sale_price }) => {
+        if (!confirmed) {
+          return { status: "preview", message: `Will update product ${product_id} price${price !== undefined ? ` to $${price}` : ""}${sale_price !== undefined ? `, sale price to $${sale_price}` : ""}. Ask the merchant to confirm.`, operation: "updateProductPrice", args: { product_id, price, sale_price } };
+        }
         const body: Record<string, unknown> = {};
         if (price !== undefined) body.price = price;
         if (sale_price !== undefined) body.sale_price = sale_price;
-        return u(
+        const result = u(
           await bc.products.PUT("/catalog/products/{product_id}", {
-            params: {
-              path: { product_id },
-              header: { Accept: "application/json", "Content-Type": "application/json" },
-            },
+            params: { path: { product_id }, header: { Accept: "application/json", "Content-Type": "application/json" } },
             body: body as never,
           }),
           `PUT /catalog/products/${product_id} (price)`,
         );
+        auditLog({ tool: "updateProductPrice", input: { product_id, ...body }, result, timestamp: new Date().toISOString() });
+        return result;
+      },
+    }),
+
+    deleteCoupon: tool({
+      description:
+        "Delete a coupon by ID. FIRST call with confirmed=false to preview, then confirmed=true after merchant confirms.",
+      inputSchema: z.object({
+        confirmed: z.boolean().default(false),
+        coupon_id: z.number().int().positive(),
+      }),
+      execute: async ({ confirmed, coupon_id }) => {
+        if (!confirmed) {
+          return { status: "preview", message: `Will delete coupon ${coupon_id}. This cannot be undone. Ask the merchant to confirm.`, operation: "deleteCoupon", args: { coupon_id } };
+        }
+        const result = u(
+          await bc.marketing.DELETE("/coupons/{id}", {
+            params: { path: { id: coupon_id }, header: { Accept: "application/json", "Content-Type": "application/json" } },
+          }),
+          `DELETE /v2/coupons/${coupon_id}`,
+        );
+        auditLog({ tool: "deleteCoupon", input: { coupon_id }, result, timestamp: new Date().toISOString() });
+        return result;
       },
     }),
   };
+}
+
+interface AuditEntry {
+  tool: string;
+  input: unknown;
+  result: unknown;
+  timestamp: string;
 }
 
 // ─── System prompt ─────────────────────────────────────────────────
@@ -535,15 +548,18 @@ You have TWO kinds of tools:
 
 2. **Top-level write tools** — \`createCoupon\`, \`updateProductInventory\`, \`setProductVisibility\`, \`updateProductPrice\`. These mutate store state. They are NOT available inside the sandbox — you must call them directly as top-level tool calls.
 
-## WRITES REQUIRE APPROVAL
+## WRITES — TWO-TURN CONFIRMATION
 
-Every write tool has \`needsApproval: true\`. When you call one, the AI SDK pauses the turn and surfaces an approval card to the merchant. The merchant clicks Execute or Cancel; only on Execute does the write run. This is architectural, not advisory — you cannot bypass it.
+Write tools have a \`confirmed\` parameter. You MUST call them TWICE:
+1. **Preview turn:** Call with \`confirmed: false\`. The tool returns a preview without executing. Show the preview to the merchant and ask them to confirm.
+2. **Execute turn:** After the merchant says "yes", "confirm", "go ahead", or similar, call the SAME tool with \`confirmed: true\` and the SAME arguments. This time it executes for real.
+
+**Never call a write tool with \`confirmed: true\` on the first mention.** Always preview first. This is a security requirement — the merchant must explicitly confirm before the store is mutated.
 
 **Rules for writes:**
-- **Only call a write tool when the merchant explicitly asks for a change.** Phrases like "create", "update", "publish", "unpublish", "adjust inventory", "mark on sale", "set the price". Never call a write tool for an informational/analytical question.
-- **Always read before you write when you need a product's current state.** For example, to mark a product "out of stock", first call \`execute\` to get the product id by name, then call \`setProductVisibility({product_id, is_visible: false})\`.
-- **Be explicit about what will change.** Before calling a write tool, emit a short sentence describing the change in plain English. The approval card will show the raw arguments — your sentence helps the merchant understand them quickly.
-- **One write per turn.** Don't chain multiple writes in a single response. If the merchant asks for multiple changes, make one write call, let them approve, then the continuation turn will handle the next.
+- **Only call a write tool when the merchant explicitly asks for a change.** Phrases like "create", "update", "publish", "unpublish", "adjust inventory", "mark on sale". Never call a write tool for an informational question.
+- **Always read before you write when you need a product's current state.** For example, to mark a product "out of stock", first call \`execute\` to get the product id by name, then preview the write.
+- **One write per turn.** Don't chain multiple writes. Preview one, wait for confirmation, execute it, then handle the next.
 
 ## RULES
 
@@ -707,11 +723,39 @@ export class AskBC extends Think<Env> {
     return SYSTEM_PROMPT;
   }
 
-  // Enable Anthropic prompt caching — the system prompt (~3KB with block
-  // catalog + API shape rules) is cached across turns within the same
-  // session, reducing input token costs on follow-up messages. [P-3]
   configureSession(session: Session) {
+    // Enable Anthropic prompt caching [P-3]
     return session.withCachedPrompt();
+  }
+
+  // ─── Audit log [F-7] ─────────────────────────────────────────────
+  private _auditTableReady = false;
+
+  private ensureAuditTable() {
+    if (this._auditTableReady) return;
+    this.ctx.storage.sql.exec(`
+      CREATE TABLE IF NOT EXISTS write_audit (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        store_hash TEXT NOT NULL,
+        tool_name TEXT NOT NULL,
+        input_json TEXT NOT NULL,
+        result_json TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    this._auditTableReady = true;
+  }
+
+  logWrite(entry: AuditEntry) {
+    this.ensureAuditTable();
+    this.ctx.storage.sql.exec(
+      `INSERT INTO write_audit (store_hash, tool_name, input_json, result_json, created_at) VALUES (?, ?, ?, ?, ?)`,
+      this.name,
+      entry.tool,
+      JSON.stringify(entry.input),
+      JSON.stringify(entry.result),
+      entry.timestamp,
+    );
   }
 
   getTools() {
@@ -721,9 +765,9 @@ export class AskBC extends Think<Env> {
     // script with Promise.all, pagination, joins, aggregation.
     const readTools = buildReadTools(this.env, bc);
 
-    // Writes are top-level tools outside the sandbox. The model calls
-    // them directly; the sandbox can't access them.
-    const writeTools = buildWriteTools(this.env, bc);
+    // Writes are top-level tools outside the sandbox with two-turn
+    // confirmation pattern [S-3]. Audit log writes to DO SQLite [F-7].
+    const writeTools = buildWriteTools(this.env, bc, (entry) => this.logWrite(entry));
 
     return {
       execute: createExecuteTool({

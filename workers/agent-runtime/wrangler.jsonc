@@ -36,7 +36,10 @@
     "APP_ORIGIN": "http://localhost:3000"
   }
   // Secrets set via wrangler secret put:
-  //   ANTHROPIC_API_KEY
-  //   BC_STORE_HASH
-  //   BC_ACCESS_TOKEN
+  //   ANTHROPIC_API_KEY         — Anthropic API key (Haiku + Sonnet)
+  //   BC_STORE_HASH             — Dev fallback: single store hash
+  //   BC_ACCESS_TOKEN           — Dev fallback: single store token
+  //   UPSTASH_REDIS_REST_URL    — Production: per-store credential lookup
+  //   UPSTASH_REDIS_REST_TOKEN  — Production: Upstash auth
+  //   CREDENTIAL_ENCRYPTION_KEY — Optional: AES-256-GCM key for encrypted tokens [S-7]
 }

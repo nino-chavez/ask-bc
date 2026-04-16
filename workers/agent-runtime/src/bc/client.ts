@@ -51,6 +51,27 @@ const v2EmptyBodyMiddleware: Middleware = {
   },
 };
 
+/**
+ * Detects 401 Unauthorized responses from BC and throws a descriptive
+ * error the agent can surface as an ErrorCard with re-auth guidance. [S-8]
+ */
+const authErrorMiddleware: Middleware = {
+  async onResponse({ response }) {
+    if (response.status === 401) {
+      throw new Error(
+        "BC API returned 401 Unauthorized — the store's access token may have been revoked or expired. " +
+        "The merchant needs to re-authorize the app from their BigCommerce control panel.",
+      );
+    }
+    if (response.status === 403) {
+      throw new Error(
+        "BC API returned 403 Forbidden — the app may not have the required OAuth scope for this operation. " +
+        "Check the API account's scope in Settings → API → Store-level API accounts.",
+      );
+    }
+  },
+};
+
 function makeClient<Paths extends {}>(
   env: BcEnv,
   version: "v3" | "v2",
@@ -65,6 +86,7 @@ function makeClient<Paths extends {}>(
       "Content-Type": "application/json",
     },
   });
+  client.use(authErrorMiddleware);
   for (const mw of opts.middleware ?? []) client.use(mw);
   return client;
 }

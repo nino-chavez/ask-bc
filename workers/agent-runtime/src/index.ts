@@ -4,19 +4,25 @@ import { routeAgentRequest } from "agents";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { tool, type LanguageModel } from "ai";
 import { z } from "zod";
-import { createBcClients } from "./bc/client.js";
+import { createBcClients, type BcClients } from "./bc/client.js";
 import { renderBlockCatalog } from "./blocks.js";
 import { searchBcDocs } from "./doc-search.js";
+import { resolveStoreCredentials, type StoreCredentials } from "./credentials.js";
 import { Session } from "agents/experimental/memory/session";
 
 interface Env {
   AskBC: DurableObjectNamespace;
   LOADER: WorkerLoader;
   ANTHROPIC_API_KEY: string;
-  BC_STORE_HASH: string;
-  BC_ACCESS_TOKEN: string;
   BC_API_BASE: string;
   APP_ORIGIN: string;
+  // Per-store credentials — resolved from Redis or env fallback [S-4]
+  UPSTASH_REDIS_REST_URL?: string;
+  UPSTASH_REDIS_REST_TOKEN?: string;
+  CREDENTIAL_ENCRYPTION_KEY?: string;
+  // Dev fallback — single-store env vars
+  BC_STORE_HASH?: string;
+  BC_ACCESS_TOKEN?: string;
 }
 
 // ─── BC tool surface ───────────────────────────────────────────────
@@ -635,13 +641,28 @@ Be concise. Merchants want answers, not explanations of your process. Prefer blo
 // ─── The Agent ─────────────────────────────────────────────────────
 
 export class AskBC extends Think<Env> {
-  // Cached BC API clients — created once on first getTools() call, reused
-  // across turns. Avoids creating 11 openapi-fetch instances per turn. [P-5]
-  private _bcClients: ReturnType<typeof createBcClients> | null = null;
+  // Per-store credentials resolved from Redis or env fallback [S-4/F-1]
+  private _credentials: StoreCredentials | null = null;
+  // Cached BC API clients — created once after credentials resolve [P-5]
+  private _bcClients: BcClients | null = null;
 
-  private getBcClients() {
+  private async ensureCredentials(): Promise<StoreCredentials> {
+    if (!this._credentials) {
+      this._credentials = await resolveStoreCredentials(this.name, this.env);
+    }
+    return this._credentials;
+  }
+
+  private getBcClients(): BcClients {
     if (!this._bcClients) {
-      this._bcClients = createBcClients(this.env);
+      if (!this._credentials) {
+        throw new Error("Credentials not resolved yet — call ensureCredentials() first");
+      }
+      this._bcClients = createBcClients({
+        BC_API_BASE: this.env.BC_API_BASE,
+        BC_STORE_HASH: this._credentials.storeHash,
+        BC_ACCESS_TOKEN: this._credentials.accessToken,
+      });
     }
     return this._bcClients;
   }
@@ -667,7 +688,10 @@ export class AskBC extends Think<Env> {
    * importantly, retries after a tool error. That's exactly where Sonnet's
    * deeper reasoning and error-recovery instincts earn their extra cost.
    */
-  beforeTurn(ctx: { continuation: boolean }): { model: LanguageModel } | void {
+  async beforeTurn(ctx: { continuation: boolean }): Promise<{ model: LanguageModel } | void> {
+    // Ensure credentials are resolved before the turn runs any tools
+    await this.ensureCredentials();
+
     if (ctx.continuation) {
       const anthropic = createAnthropic({ apiKey: this.env.ANTHROPIC_API_KEY });
       this._lastModelUsed.push("sonnet-4-6");
@@ -853,11 +877,12 @@ export default {
         });
       }
 
-      const id = env.AskBC.idFromName(env.BC_STORE_HASH);
+      const storeHash = env.BC_STORE_HASH ?? "dev-store";
+      const id = env.AskBC.idFromName(storeHash);
       const stub = env.AskBC.get(id) as unknown as AskBC & {
         setName(name: string): Promise<void>;
       };
-      await stub.setName(env.BC_STORE_HASH);
+      await stub.setName(storeHash);
       const result = await stub.smokeAsk(body.message);
 
       return withCors(

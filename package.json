@@ -28,6 +28,7 @@
     "react-dom": "^18.2.0",
     "react-is": "^19.2.5",
     "styled-components": "^5.3.11",
+    "vercel": "^51.5.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {

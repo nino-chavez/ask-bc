@@ -82,7 +82,7 @@ export default function WorkerChatPanel({
   // The token is minted server-side from the session cookie and
   // passed as ?token= on the WebSocket URL for the Worker's auth gate.
   useEffect(() => {
-    fetch(`/api/agent-token?storeHash=${storeHash}`)
+    fetch(`/stores/${storeHash}/api/agent-token`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data?.token) setAgentToken(data.token);

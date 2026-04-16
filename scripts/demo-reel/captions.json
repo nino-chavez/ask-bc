@@ -5,64 +5,64 @@
   "defaultHoldSeconds": 0.4,
   "scenes": [
     {
-      "image": "demo-01-empty-state.png",
-      "title": "Ask BC — an assistant inside the admin",
-      "caption": "This is Ask BC, a single-click marketplace app that lives inside the BigCommerce control panel. It gives merchants a chat interface over their actual store data — orders, products, customers, promotions, inventory, and the BigCommerce help docs — without leaving the admin, without opening a report, and without writing a query."
+      "image": "demo-01-empty.png",
+      "title": "Ask BC — an AI operator for your BigCommerce store",
+      "caption": "This is Ask BC, a chat surface that connects to a BigCommerce store through a Cloudflare Worker running Project Think. The merchant types a question. The agent writes TypeScript, executes it in a sandboxed Dynamic Worker, and streams real React components inline — not markdown tables, real UI. Five suggested questions, a text input, and a green dot showing the WebSocket is live."
     },
     {
-      "image": "demo-02-first-question.png",
-      "title": "A real question, answered from real data",
-      "caption": "A merchant types a plain-English question. 'What are my top-selling products this month?' Ask BC doesn't search a knowledge base or hallucinate a guess. It reaches into the store's live REST API, pulls orders and line items, aggregates them, and formats the result the way a merchant actually wants to read it."
+      "image": "demo-02-kpi.png",
+      "title": "KPI summary — five metrics in one shot",
+      "caption": "The merchant asks for a store summary. The agent writes one TypeScript script that calls getProducts, getCustomers, getOrderCount, and getOrders in parallel, aggregates total revenue and average order value in memory, and returns five KPI cards. One hundred nineteen products, one hundred twenty-seven customers, forty-seven orders, eighty-one thousand dollars in revenue, seventeen hundred dollar average order value. Six point six seconds, Haiku four-point-five, one execute."
     },
     {
-      "image": "demo-03-tool-loop.png",
-      "title": "Claude picks the tools",
-      "caption": "Under the hood, Claude has fifteen BigCommerce tools available — get orders, get products, get customers, get inventory, search docs, and so on. The model decides which tools to call, in what order, with what arguments. The AI SDK runs the loop automatically: call a tool, feed the result back, decide whether to call another, until the question is answered."
+      "image": "demo-03-table.png",
+      "title": "Structured tables — typed columns, real data",
+      "caption": "Next question: most expensive products. The agent emits a DataTable component with typed columns — product name, SKU, price right-aligned, inventory right-aligned. Five rows of real catalog data from the BigCommerce V3 API. The model sorted by price in memory because the API's sort enum doesn't include price. Five point five seconds."
     },
     {
-      "image": "demo-04-table-response.png",
-      "title": "Formatted like a merchant wants it",
-      "caption": "The answer streams back as markdown — a clean table with product name, units sold, and revenue, sorted descending. Not a JSON dump, not a wall of text. Ask BC knows its audience is a store operator, not a developer, so the response renders the way a human would write it up in a weekly review."
+      "image": "demo-04-orders.png",
+      "title": "Three-way join — orders, line items, customers",
+      "caption": "Now the hard question: show me my five most recent completed orders with line items and customer info. On the old tool-loop stack this was impossible — it would chain seven serial tool calls and hit the step cap. Here the agent writes one script that fetches completed orders, fans out getOrderProducts for each, joins in memory, and returns a structured table with per-line-item detail. Product name, quantity, unit price, line total — all real data from three different API surfaces joined in a single sandbox execution."
     },
     {
-      "image": "demo-05-followup-chips.png",
-      "title": "Follow-up suggestions keep the conversation moving",
-      "caption": "Below every response, Ask BC surfaces clickable follow-ups — 'show me the slowest movers,' 'break this down by channel,' 'compare to last month.' Each chip is a one-click next question, generated from the context of the answer you just got. The merchant stays in flow instead of hunting for what to ask next."
+      "image": "demo-05-write-input.png",
+      "title": "Write operations — the merchant asks for a change",
+      "caption": "The merchant types: create a coupon called WINTER twenty for twenty percent off. This isn't a read. The agent identifies the intent, selects the createCoupon tool, and emits the tool call with typed arguments: name, code, type percentage discount, amount twenty, enabled true. No codemode sandbox this time — writes are top-level tools that execute directly with the real BC access token."
     },
     {
-      "image": "demo-06-chained-tools.png",
-      "title": "Harder questions chain tools together",
-      "caption": "Now a compound question. 'Which customers haven't ordered in ninety days and used to buy from the outdoor category?' That's two tool calls chained — get customers, then filter against order history and category. Claude plans the sequence, the SDK enforces a step limit, and the result comes back as a ranked list the merchant can act on."
+      "image": "demo-06-write-confirm.png",
+      "title": "Write confirmation — verified in BigCommerce",
+      "caption": "The coupon is created. The WriteApproval card shows EXECUTED with a green confirmation strip — change applied to your store. Below it, the agent summarizes: code WINTER twenty, discount twenty percent off, scope store-wide, status enabled. This isn't hallucinated. The BigCommerce V2 coupons API returned two-oh-one Created, and the agent read the response to build the summary. We verified it directly: curl to the coupons endpoint, id two, code WINTER twenty, amount twenty, enabled true."
     },
     {
-      "image": "demo-07-orders-extension.png",
-      "title": "Context-aware on the Orders page",
-      "caption": "Ask BC also registers App Extensions. From any order detail page, a contextual panel opens already knowing which order you're looking at. 'Why is this order delayed?' The system prompt injects the order ID, Claude calls get order and get shipping, and the answer is specific to that single order — no copy-paste, no context-switching."
+      "image": "demo-07-codemode.png",
+      "title": "Why Codemode matters",
+      "caption": "Under the hood, every read question follows the same pattern. The model writes TypeScript. The TypeScript runs in a Dynamic Worker sandbox with zero network access — the only way out is codemode-dot-star RPC calls that resolve to typed tool functions in the host worker. The host holds the BigCommerce access token. The sandbox never sees it. This is the same credential isolation architecture Cloudflare uses in Agent Lee."
     },
     {
-      "image": "demo-08-products-extension.png",
-      "title": "Context-aware on the Products page",
-      "caption": "Same pattern on Products. Open any product, the panel appears, and you can ask 'how is this SKU performing across channels' or 'what's the current inventory by warehouse.' The extension is just another chat surface, but the context is pinned — every question is implicitly scoped to the entity in front of you."
+      "image": "demo-08-two-model.png",
+      "title": "Two models — speed where it's cheap, power where it counts",
+      "caption": "Haiku four-point-five handles every normal chat turn including in-turn error recovery. Three times cheaper, two-point-six times faster than Sonnet. Sonnet four-point-six activates automatically on continuation turns — post-approval write execution and chat recovery after a Durable Object restart. The merchant gets fast answers on reads, deep reasoning on writes. Both models share the same typed tool surface."
     },
     {
-      "image": "demo-09-docs-answer.png",
-      "title": "How-to questions, with real doc links",
-      "caption": "Ask BC isn't only for store data. Ask it 'how do I set up free shipping on orders over fifty dollars,' and a sixteenth tool — search documentation — queries the BigCommerce help corpus, cites the relevant pages, and returns step-by-step instructions with links. One assistant for 'what is my store doing' and 'how do I make my store do something.'"
+      "image": "demo-09-components.png",
+      "title": "Six generative UI components",
+      "caption": "The agent doesn't output markdown and hope the client formats it. It emits fenced code blocks with language 'block' containing typed JSON — KPI cards, data tables, product cards, order timelines, inventory bars, sparkline charts. The Next.js client parses these and mounts real React components inline. Each component is styled to match BigDesign, the BigCommerce admin component library, so the output feels native to the control panel."
     },
     {
-      "image": "demo-10-history.png",
-      "title": "Chat history persists across sessions",
-      "caption": "Every conversation is saved to IndexedDB in the browser, so the merchant can close the panel, come back tomorrow, and pick up exactly where they left off. Threads are per-store, per-user, and never leave the device. The server only sees the current turn — history is local by design."
+      "image": "demo-10-architecture.png",
+      "title": "The architecture — hybrid Vercel plus Cloudflare",
+      "caption": "Next.js on Vercel handles OAuth install, JWT sessions, the iframe shell, and App Extensions registration. The Cloudflare Worker handles the agent runtime — Project Think as the base class, Codemode for execution, a Durable Object per store for session persistence, and Dynamic Workers for sandboxed code execution. The browser connects directly to the Worker via WebSocket. Credentials stay in the Durable Object — generated code in the sandbox never touches them."
     },
     {
-      "image": "demo-11-architecture.png",
-      "title": "The architecture is small on purpose",
-      "caption": "Zooming out: Next.js 15 on Vercel, the AI SDK handling the tool loop, Claude Haiku four-point-five as the model, Upstash Redis for store credentials, and BigDesign components rendering inside the admin iframe. Fifteen tools, one system prompt, one chat route. No vector database, no fine-tune, no agent framework — the SDK's native tool calling is enough."
+      "image": "demo-11-typed-sdk.png",
+      "title": "Typed BigCommerce SDK — fifteen read tools, four write tools",
+      "caption": "Eleven OpenAPI specs pulled from BigCommerce's public docs repo, run through openapi-typescript to generate thirty-five thousand lines of typed definitions. Fifteen read tools cover products, variants, categories, brands, orders, order line items, shipping addresses, customers, inventory locations, promotions, coupons, and channels. Four write tools for coupon creation, inventory adjustment, product visibility, and price updates. All backed by openapi-fetch with typed path validation."
     },
     {
       "image": "demo-12-close.png",
-      "title": "Your store, answering its own questions",
-      "caption": "That's Ask BC. A chat surface over the store's own APIs, a context-aware panel on every entity page, and a doc search for how-to questions — all from a single marketplace install. The merchant doesn't learn a new tool. They just ask the question they would have asked a human operator, and the store answers."
+      "title": "Your store, operating itself",
+      "caption": "That's Ask BC. A chat surface over the store's real APIs, with generative UI components that render platform-native, write operations that mutate store state, and a Codemode execution model that turns every question into a single TypeScript script. The merchant doesn't learn a new tool. They just tell the store what they want, and the store does it."
     }
   ]
 }

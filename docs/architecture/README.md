@@ -23,45 +23,45 @@ graph TB
         EXT[App Extension Panels<br/>Orders + Products]
     end
 
-    subgraph "Ask BC — Next.js on Vercel"
-        MW[Middleware<br/>JWT Session]
-        AUTH[OAuth Routes<br/>/api/auth, /api/load]
-        UI[WorkerChatPanel<br/>useAgentChat + BigDesign]
-        EXT_PAGES[Extension Pages<br/>Orders + Products]
-        BLOCKS[Block Renderer<br/>7 React Components]
+    subgraph "Ask BC - Next.js on Vercel"
+        MW["Middleware - JWT Session"]
+        AUTH["OAuth Routes - /api/auth, /api/load"]
+        UI["WorkerChatPanel - useAgentChat + BigDesign"]
+        EXT_PAGES["Extension Pages - Orders + Products"]
+        BLOCKS["Block Renderer - 7 React Components"]
     end
 
-    subgraph "Ask BC — Cloudflare Worker"
-        WS[WebSocket Upgrade<br/>JWT Auth Gate]
-        DO[Durable Object<br/>AskBC per store]
-        CM[Codemode Sandbox<br/>Dynamic Worker]
-        AUDIT[Write Audit Log<br/>DO SQLite]
+    subgraph "Ask BC - Cloudflare Worker"
+        WS["WebSocket Upgrade - JWT Auth Gate"]
+        DO["Durable Object - AskBC per store"]
+        CM["Codemode Sandbox - Dynamic Worker"]
+        AUDIT["Write Audit Log - DO SQLite"]
     end
 
     subgraph "External Services"
-        CLAUDE_H[Claude Haiku 4.5<br/>default turns]
-        CLAUDE_S[Claude Sonnet 4.6<br/>continuation turns]
-        BCAPI[BigCommerce<br/>REST API V2/V3]
-        REDIS[(Upstash Redis<br/>Encrypted Credentials)]
-        IDB[(IndexedDB<br/>Chat History)]
+        CLAUDE_H["Claude Haiku 4.5 - default turns"]
+        CLAUDE_S["Claude Sonnet 4.6 - continuation turns"]
+        BCAPI["BigCommerce REST API V2/V3"]
+        REDIS[("Upstash Redis - Encrypted Credentials")]
+        IDB[("IndexedDB - Chat History")]
     end
 
-    CP -->|load callback| MW
-    CP -->|install| AUTH
-    EXT -->|panel load| EXT_PAGES
-    UI -->|WebSocket + JWT| WS
-    EXT_PAGES -->|WebSocket + JWT| WS
-    WS -->|validate storeHash| DO
-    DO -->|getModel()| CLAUDE_H
-    DO -->|beforeTurn(continuation)| CLAUDE_S
-    DO -->|createExecuteTool| CM
-    CM -->|codemode.* RPC| BCAPI
-    DO -->|write tools| BCAPI
-    DO -->|logWrite| AUDIT
-    AUTH -->|save encrypted token| REDIS
-    DO -->|resolveStoreCredentials| REDIS
-    UI -->|block JSON| BLOCKS
-    UI -->|persist| IDB
+    CP -->|"load callback"| MW
+    CP -->|"install"| AUTH
+    EXT -->|"panel load"| EXT_PAGES
+    UI -->|"WebSocket + JWT"| WS
+    EXT_PAGES -->|"WebSocket + JWT"| WS
+    WS -->|"validate storeHash"| DO
+    DO -->|"getModel"| CLAUDE_H
+    DO -->|"beforeTurn continuation"| CLAUDE_S
+    DO -->|"createExecuteTool"| CM
+    CM -->|"codemode RPC"| BCAPI
+    DO -->|"write tools"| BCAPI
+    DO -->|"logWrite"| AUDIT
+    AUTH -->|"save encrypted token"| REDIS
+    DO -->|"resolveStoreCredentials"| REDIS
+    UI -->|"block JSON"| BLOCKS
+    UI -->|"persist"| IDB
 ```
 
 ## Worker Data Flow: Chat Turn with Codemode
@@ -75,7 +75,7 @@ sequenceDiagram
     participant BC as BigCommerce REST API
     participant R as Upstash Redis
 
-    B->>W: WebSocket upgrade (?token=<jwt>)
+    B->>W: WebSocket upgrade with JWT token
     W->>W: jwtVerify(token) + validate storeHash claim
     W->>DO: routeAgentRequest → room=storeHash
     B->>DO: User message "Top 5 low-stock products"
@@ -88,8 +88,8 @@ sequenceDiagram
     BC-->>CM: {data: [products...], meta: {pagination}}
     CM-->>DO: [{name, inventory, price}, ...]
     DO->>DO: Model generates response with block JSON
-    DO-->>B: SSE stream (text + ```block JSON```)
-    B->>B: Block parser extracts block, renders <InventoryBar>
+    DO-->>B: SSE stream with text + block JSON fences
+    B->>B: Block parser extracts block, renders InventoryBar component
 ```
 
 ## Worker Data Flow: Write Operation (Two-Turn)

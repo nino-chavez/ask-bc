@@ -1,67 +1,67 @@
 {
-  "voice": "josh",
+  "voice": "TABZn6CDfjMNGrsnGzzD",
   "model": "eleven_multilingual_v2",
   "defaultHoldSeconds": 0.5,
   "scenes": [
     {
       "image": "demo-01-empty.png",
       "title": "Ask BC — inside the BigCommerce control panel",
-      "caption": "So this is Ask BC, and the important thing is where it lives — inside the BigCommerce admin, not a separate app. That matters because the merchant doesn't context-switch. They're already here managing orders and products. The green dot is a live WebSocket to a Cloudflare Worker — not an API route, not a polling loop, a persistent connection to a Durable Object that holds this merchant's session state."
+      "caption": "This is Ask BC — and the important thing is where it lives. It's right here inside the BigCommerce admin. Not a separate app, not a new tab. <break time=\"0.5s\" /> That green dot means we have a live WebSocket connection to a Cloudflare Worker — a persistent connection to a Durable Object that holds this merchant's session. <break time=\"0.3s\" /> Let me show you what it can do."
     },
     {
       "image": "demo-02-kpi.png",
       "title": "One question, six metrics",
-      "caption": "I asked for a store summary. What came back isn't markdown — those are real React components rendered inline. Functionally, the merchant got their answer in six seconds instead of clicking through four different admin pages. Technically, the agent wrote one TypeScript script that called four APIs in parallel and computed derived metrics in memory. That's the Codemode advantage — one execution replaces what would've been ten serial tool calls on a traditional agent."
+      "caption": "I asked for a store summary. What came back isn't a wall of text — those are real React components, rendering inline. <break time=\"0.4s\" /> Functionally, the merchant got their answer in about six seconds — instead of clicking through four different admin pages. Technically, the agent wrote one TypeScript script that called four APIs in parallel and computed the totals in memory. That's the Codemode advantage — one execution replaces what would have been ten serial tool calls."
     },
     {
       "image": "demo-03-table.png",
       "title": "Structured tables with follow-up suggestions",
-      "caption": "Products table with real SKUs. But the 'so what' is below it — follow-up suggestions generated from the response content. The merchant doesn't have to figure out what to ask next. That's the difference between a chatbot and an assistant — an assistant anticipates the next question. Copy and feedback buttons on every response, because the merchant owns this data and might need it in a spreadsheet or a Slack message."
+      "caption": "Now a products table with real SKUs, right-aligned prices. But look below it — follow-up suggestions, generated from the response content. <break time=\"0.3s\" /> The merchant doesn't have to think about what to ask next. That's the difference between a chatbot and an assistant — an assistant anticipates the next question. And there's copy and feedback buttons on every response, because the merchant owns this data."
     },
     {
       "image": "demo-04-orders.png",
-      "title": "Three-way join — orders, line items, customers",
-      "caption": "This is the query that breaks traditional agent architectures. Five orders with per-line-item detail from three different API surfaces, joined in memory, with computed totals. On a tool-calling agent, this would chain seven or eight serial round-trips and likely hit a step limit before finishing. With Codemode, the model writes one script that fetches everything in parallel and returns structured tables. Architecturally, that's the argument for code generation over tool calling — the model plans the entire query graph upfront instead of discovering it one call at a time."
+      "title": "Three-way join",
+      "caption": "This is the query that breaks traditional agent architectures. <break time=\"0.4s\" /> Five completed orders — each with per-line-item detail — from three different API surfaces, joined in memory, with computed totals. On a tool-calling agent, this would chain seven or eight serial round-trips and probably hit a step limit before finishing. <break time=\"0.3s\" /> With Codemode, the model writes one script that fetches everything in parallel and returns structured tables. The model plans the entire query graph upfront — instead of discovering it one call at a time."
     },
     {
       "image": "demo-05-tools.png",
       "title": "Transparent tool usage",
-      "caption": "Every response shows which tools the agent called. This matters for trust — when an AI tells a merchant their revenue is eighty-one thousand dollars, the merchant needs to know where that number came from. Expand the indicator, see the exact APIs. It's also a debugging surface for us — if the agent gives a wrong answer, we can trace which tools it called and what data it saw."
+      "caption": "Every response shows which tools the agent called. This matters for trust — when an AI tells a merchant their revenue number, the merchant needs to know where that came from. Expand the indicator, see the exact APIs. <break time=\"0.3s\" /> It's also a debugging surface for us. If the agent gives a wrong answer, we can trace which tools it used and what data it saw."
     },
     {
       "image": "demo-06-write-preview.png",
       "title": "Write operations — preview before execution",
-      "caption": "Now the agent isn't just reading — it's about to change the store. I said 'create a coupon,' and it did something important: it previewed the operation first. Showed me the exact arguments — code, discount type, amount — and asked to confirm. Functionally, the merchant stays in control. Technically, write tools use a two-turn pattern — the first call returns a preview, the second call with confirmation actually executes. The store doesn't change until the merchant explicitly says yes."
+      "caption": "Now the agent isn't just reading — it's about to change the store. I said create a coupon. <break time=\"0.4s\" /> And it did something important — it previewed the operation first. Showed me the exact arguments. Code, discount type, amount. And asked to confirm. <break time=\"0.3s\" /> Functionally, the merchant stays in control. Technically, write tools use a two-turn pattern — the first call returns a preview, the second call actually executes. The store doesn't change until the merchant says yes."
     },
     {
       "image": "demo-07-write-confirmed.png",
       "title": "Confirmed and created",
-      "caption": "I confirmed, and coupon REEL twenty-five is now live in BigCommerce. Coupon ID four, twenty-five percent off, store-wide. That's not a mock — I can go verify it in the marketing section right now. Architecturally, write tools live outside the Codemode sandbox — the model can't accidentally trigger a write from inside generated code. Every mutation flows through an explicit tool call with typed arguments and an audit log in the Durable Object's SQLite."
+      "caption": "I confirmed, and the coupon is now live in BigCommerce. <break time=\"0.3s\" /> That's a real coupon — I can verify it in the marketing section right now. Architecturally — write tools live outside the Codemode sandbox. The model can't accidentally trigger a write from inside generated code. Every mutation flows through an explicit tool call with typed arguments and an audit log."
     },
     {
       "image": "demo-08-docs.png",
       "title": "How-to questions",
-      "caption": "And it's not just data. I asked how to set up free shipping, and instead of a generic answer, it gave three concrete options with specific navigation paths in the admin. Then offered to create the coupon right there in the chat. That's the 'so what' for the merchant — one surface for 'what is my store doing' and 'how do I make my store do something different.' They don't need to search help docs and then come back to the admin to act on what they learned."
+      "caption": "And it's not just data. I asked how to set up free shipping — and instead of a generic answer, it gave three concrete options with specific navigation paths in the admin. <break time=\"0.3s\" /> Then offered to create the coupon right there in the chat. One surface for what is my store doing — and how do I make my store do something different."
     },
     {
       "image": "demo-09-codemode.png",
       "title": "Why Codemode",
-      "caption": "Here's the architectural core. The model writes TypeScript, not tool calls. That code runs in a Dynamic Worker sandbox with zero network access. The only way out is typed RPC functions that resolve back to the host worker — which holds the merchant's BigCommerce access token. The token never appears in generated code. This is the same credential isolation architecture Cloudflare uses in Agent Lee. Promise-dot-all for parallelism, in-memory joins, defensive error handling — the model writes the kind of code a developer would."
+      "caption": "Here's the architectural core. <break time=\"0.4s\" /> The model writes TypeScript — not tool calls. That code runs in a sandboxed Dynamic Worker with zero network access. The only way out is typed RPC functions that resolve back to the host worker, which holds the merchant's access token. <break time=\"0.3s\" /> The token never appears in generated code. This is the same credential isolation architecture Cloudflare uses in Agent Lee."
     },
     {
       "image": "demo-10-architecture.png",
       "title": "The architecture",
-      "caption": "Two services, clear responsibilities. Vercel handles what it's good at — OAuth, server-rendered pages, the iframe shell, React components. Cloudflare handles what it's good at — long-lived WebSocket connections, per-tenant Durable Objects, sub-ten-millisecond sandbox execution. Credentials are encrypted at rest in Upstash Redis and resolved per merchant at runtime. The 'so what' architecturally — no single-tenant shortcuts. Every piece of this scales to a thousand stores without code changes."
+      "caption": "Two services, clear responsibilities. <break time=\"0.3s\" /> Vercel handles what it's good at — OAuth, server-rendered pages, the iframe, React components. Cloudflare handles what it's good at — long-lived WebSocket connections, per-tenant Durable Objects, sub-ten-millisecond sandbox execution. <break time=\"0.3s\" /> Credentials are encrypted at rest and resolved per merchant at runtime. Every piece of this scales to a thousand stores without code changes."
     },
     {
       "image": "demo-11-typed-sdk.png",
       "title": "Twenty-nine curated tools",
-      "caption": "Twenty-nine tools generated from BigCommerce's own OpenAPI specs. Not hand-waved descriptions — real typed interfaces the model writes code against. Twenty-two reads inside the sandbox. Seven writes outside it with two-turn confirmation. The curation matters — we taught the model that V2 orders return bare arrays with string-typed numbers, that status ID ten means completed, that the coupons endpoint requires an applies-to field. That domain knowledge is what makes the agent work on the first try instead of burning retries discovering API quirks."
+      "caption": "Twenty-nine tools, all generated from BigCommerce's own OpenAPI specs. <break time=\"0.3s\" /> Twenty-two read tools inside the Codemode sandbox. Seven write tools outside it with two-turn confirmation. <break time=\"0.4s\" /> The curation matters — we taught the model that version two orders return bare arrays with string-typed numbers, that status ID ten means completed, that the coupons endpoint requires an applies-to field. That domain knowledge is what makes the agent work on the first try."
     },
     {
       "image": "demo-12-close.png",
       "title": "Your store, operating itself",
-      "caption": "That's Ask BC. The 'so what' for the merchant — they don't learn a new tool, they just talk to the one they already have. The 'so what' for the platform — every BigCommerce store gets an AI operator that reads, writes, and explains, from a single marketplace install. The 'so what' for anyone building this — Codemode plus curated tools plus generative UI is the pattern. It works."
+      "caption": "That's Ask BC. <break time=\"0.5s\" /> The merchant doesn't learn a new tool — they just talk to the one they already have. Every BigCommerce store gets an AI operator that reads, writes, and explains — from a single marketplace install. <break time=\"0.4s\" /> Codemode plus curated tools plus generative UI. That's the pattern. It works."
     }
   ]
 }

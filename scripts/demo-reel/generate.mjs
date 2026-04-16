@@ -112,9 +112,9 @@ async function generateTTS_ElevenLabs(text, outputPath) {
 			text,
 			model_id: TTS_MODEL,
 			voice_settings: {
-				stability: 0.4,          // lower = more expressive
-				similarity_boost: 0.75,
-				style: 0.35,             // conversational style
+				stability: 0.55,         // balanced — natural, not robotic
+				similarity_boost: 0.80,
+				style: 0.25,             // subtle style, not theatrical
 				use_speaker_boost: true,
 			},
 		}),

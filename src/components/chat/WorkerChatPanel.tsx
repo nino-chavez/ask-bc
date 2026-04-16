@@ -180,7 +180,7 @@ export default function WorkerChatPanel({
   const followUps = !isLoading && messages.length > 0 ? generateFollowUps(lastAssistantText) : [];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#fafbfc', fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", color: '#313440' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#fafbfc', fontFamily: "'Source Sans 3', 'Source Sans Pro', 'Helvetica Neue', Arial, sans-serif", color: '#313440' }}>
       {/* Header */}
       <header style={{ padding: pad, borderBottom: '1px solid #e8e9ef', background: 'white', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>

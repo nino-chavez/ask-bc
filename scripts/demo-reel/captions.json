@@ -1,68 +1,68 @@
 {
-  "voice": "ash",
+  "voice": "coral",
   "model": "gpt-4o-mini-tts",
-  "instructions": "Speak confidently and conversationally, like a senior product manager giving a live technical demo to an engineering audience. Clear enunciation, steady medium pace, warm but precise. Light inflection on key terms. No hype, no salesiness, no pauses between sentences. Flow naturally from one thought to the next.",
-  "defaultHoldSeconds": 0.4,
+  "instructions": "You're giving a live product demo to a small group of engineers and product leaders. Conversational, not scripted. You're genuinely excited about what you built but not selling — you're showing. After each feature, land the 'so what' — why does this matter functionally for the merchant, technically for the platform, and architecturally for anyone building agentic commerce tools. Vary your pacing: faster when building momentum, slower when making a key point. Use natural contractions.",
+  "defaultHoldSeconds": 0.5,
   "scenes": [
     {
       "image": "demo-01-empty.png",
       "title": "Ask BC — inside the BigCommerce control panel",
-      "caption": "This is Ask BC running live inside the BigCommerce admin. It's a real marketplace app — one-click install, embedded in the iframe, authenticated via OAuth. The green dot means the browser is connected directly to a Cloudflare Worker via WebSocket. Six suggestion chips. A text input. That's the whole surface."
+      "caption": "So this is Ask BC, and the important thing is where it lives — inside the BigCommerce admin, not a separate app. That matters because the merchant doesn't context-switch. They're already here managing orders and products. The green dot is a live WebSocket to a Cloudflare Worker — not an API route, not a polling loop, a persistent connection to a Durable Object that holds this merchant's session state."
     },
     {
       "image": "demo-02-kpi.png",
       "title": "One question, six metrics",
-      "caption": "The merchant asks for a store summary. The agent writes one TypeScript script that calls four APIs in parallel — products, customers, orders, channels — and returns six KPI cards. One hundred nineteen products, one hundred twenty-seven customers, forty-seven orders, four sales channels. The tool indicator says 'Used one tool' because all four API calls happened inside a single Codemode execution."
+      "caption": "I asked for a store summary. What came back isn't markdown — those are real React components rendered inline. Functionally, the merchant got their answer in six seconds instead of clicking through four different admin pages. Technically, the agent wrote one TypeScript script that called four APIs in parallel and computed derived metrics in memory. That's the Codemode advantage — one execution replaces what would've been ten serial tool calls on a traditional agent."
     },
     {
       "image": "demo-03-table.png",
       "title": "Structured tables with follow-up suggestions",
-      "caption": "Five most expensive products as a DataTable. Product name, price right-aligned, SKU, stock level. The agent notes two premium items are out of stock. Below the response: copy button, thumbs up and down for feedback, and two follow-up suggestion chips generated from the response content. One click to drill deeper."
+      "caption": "Products table with real SKUs. But the 'so what' is below it — follow-up suggestions generated from the response content. The merchant doesn't have to figure out what to ask next. That's the difference between a chatbot and an assistant — an assistant anticipates the next question. Copy and feedback buttons on every response, because the merchant owns this data and might need it in a spreadsheet or a Slack message."
     },
     {
       "image": "demo-04-orders.png",
       "title": "Three-way join — orders, line items, customers",
-      "caption": "Five completed orders with per-line-item breakdowns. Products, orders, and line items joined in memory from three different API surfaces in a single script execution. Unit prices, quantities, line totals, order totals. The summary computes the combined revenue across all five orders: seven thousand seven hundred ninety-eight dollars."
+      "caption": "This is the query that breaks traditional agent architectures. Five orders with per-line-item detail from three different API surfaces, joined in memory, with computed totals. On a tool-calling agent, this would chain seven or eight serial round-trips and likely hit a step limit before finishing. With Codemode, the model writes one script that fetches everything in parallel and returns structured tables. Architecturally, that's the argument for code generation over tool calling — the model plans the entire query graph upfront instead of discovering it one call at a time."
     },
     {
       "image": "demo-05-tools.png",
       "title": "Transparent tool usage",
-      "caption": "Every response shows which tools the agent called. Click to expand and see the exact API surfaces. Not a black box — the merchant can see that the agent called 'code execution' which internally queried orders and order products. Every query is traceable."
+      "caption": "Every response shows which tools the agent called. This matters for trust — when an AI tells a merchant their revenue is eighty-one thousand dollars, the merchant needs to know where that number came from. Expand the indicator, see the exact APIs. It's also a debugging surface for us — if the agent gives a wrong answer, we can trace which tools it called and what data it saw."
     },
     {
       "image": "demo-06-write-preview.png",
       "title": "Write operations — preview before execution",
-      "caption": "The merchant says 'create a coupon called REEL twenty-five for twenty-five percent off.' The agent calls createCoupon with confirmed false — a preview. The WriteApproval card shows the arguments: name, code, type percentage discount, amount twenty-five, enabled. The agent asks the merchant to confirm before creating."
+      "caption": "Now the agent isn't just reading — it's about to change the store. I said 'create a coupon,' and it did something important: it previewed the operation first. Showed me the exact arguments — code, discount type, amount — and asked to confirm. Functionally, the merchant stays in control. Technically, write tools use a two-turn pattern — the first call returns a preview, the second call with confirmation actually executes. The store doesn't change until the merchant explicitly says yes."
     },
     {
       "image": "demo-07-write-confirmed.png",
-      "title": "Confirmed and created — verified in BigCommerce",
-      "caption": "The merchant says 'yes, create it.' The agent calls createCoupon again with confirmed true. BigCommerce returns coupon ID four. The confirmation card shows EXECUTED with a green strip. Code REEL twenty-five, twenty-five percent off, active, no expiration. Two-turn confirmation — the store only changed because the merchant explicitly said yes."
+      "title": "Confirmed and created",
+      "caption": "I confirmed, and coupon REEL twenty-five is now live in BigCommerce. Coupon ID four, twenty-five percent off, store-wide. That's not a mock — I can go verify it in the marketing section right now. Architecturally, write tools live outside the Codemode sandbox — the model can't accidentally trigger a write from inside generated code. Every mutation flows through an explicit tool call with typed arguments and an audit log in the Durable Object's SQLite."
     },
     {
       "image": "demo-08-docs.png",
-      "title": "How-to questions with step-by-step guidance",
-      "caption": "The merchant asks 'how do I set up free shipping on orders over fifty dollars.' The agent doesn't just search docs — it gives three options: create a coupon, configure shipping methods in the admin, or set up an automatic promotion. Each with specific navigation paths. And then offers to create the coupon right there in the chat."
+      "title": "How-to questions",
+      "caption": "And it's not just data. I asked how to set up free shipping, and instead of a generic answer, it gave three concrete options with specific navigation paths in the admin. Then offered to create the coupon right there in the chat. That's the 'so what' for the merchant — one surface for 'what is my store doing' and 'how do I make my store do something different.' They don't need to search help docs and then come back to the admin to act on what they learned."
     },
     {
       "image": "demo-09-codemode.png",
-      "title": "Why Codemode — the model writes TypeScript",
-      "caption": "Under the hood, the model writes TypeScript that runs in a Dynamic Worker sandbox with zero network access. The only way out is codemode-dot-star RPC calls that resolve to typed tool functions in the host worker. The host holds the BigCommerce access token. The sandbox never sees it. Promise-dot-all for parallelism. In-memory joins. Guest checkout filtering. One script replaces ten serial tool calls."
+      "title": "Why Codemode",
+      "caption": "Here's the architectural core. The model writes TypeScript, not tool calls. That code runs in a Dynamic Worker sandbox with zero network access. The only way out is typed RPC functions that resolve back to the host worker — which holds the merchant's BigCommerce access token. The token never appears in generated code. This is the same credential isolation architecture Cloudflare uses in Agent Lee. Promise-dot-all for parallelism, in-memory joins, defensive error handling — the model writes the kind of code a developer would."
     },
     {
       "image": "demo-10-architecture.png",
-      "title": "Hybrid architecture — Vercel for the UI, Cloudflare for the agent",
-      "caption": "Next.js on Vercel handles OAuth, the iframe shell, and the chat UI with generative block components. The Cloudflare Worker handles the agent runtime — Project Think as the base class, Codemode for execution, a Durable Object per store for session persistence, and Dynamic Workers for sandboxed code execution. The browser connects directly to the Worker via WebSocket. Credentials are encrypted in Upstash Redis and resolved per store at runtime."
+      "title": "The architecture",
+      "caption": "Two services, clear responsibilities. Vercel handles what it's good at — OAuth, server-rendered pages, the iframe shell, React components. Cloudflare handles what it's good at — long-lived WebSocket connections, per-tenant Durable Objects, sub-ten-millisecond sandbox execution. Credentials are encrypted at rest in Upstash Redis and resolved per merchant at runtime. The 'so what' architecturally — no single-tenant shortcuts. Every piece of this scales to a thousand stores without code changes."
     },
     {
       "image": "demo-11-typed-sdk.png",
-      "title": "Twenty-nine curated tools from BigCommerce's OpenAPI specs",
-      "caption": "Fourteen OpenAPI specs pulled from BigCommerce's public docs, run through openapi-typescript to generate forty-one thousand lines of typed definitions. Twenty-two read tools inside the Codemode sandbox covering products, orders, customers, inventory, shipping, tax, channels, and help docs. Seven write tools outside the sandbox with two-turn confirmation — coupons, inventory, visibility, pricing, order status, and product creation. All backed by openapi-fetch with typed path validation."
+      "title": "Twenty-nine curated tools",
+      "caption": "Twenty-nine tools generated from BigCommerce's own OpenAPI specs. Not hand-waved descriptions — real typed interfaces the model writes code against. Twenty-two reads inside the sandbox. Seven writes outside it with two-turn confirmation. The curation matters — we taught the model that V2 orders return bare arrays with string-typed numbers, that status ID ten means completed, that the coupons endpoint requires an applies-to field. That domain knowledge is what makes the agent work on the first try instead of burning retries discovering API quirks."
     },
     {
       "image": "demo-12-close.png",
       "title": "Your store, operating itself",
-      "caption": "That's Ask BC. A real marketplace app in the BigCommerce control panel. Generative UI components that render platform-native. Write operations that mutate store state with merchant confirmation. Twenty-nine curated tools powered by Codemode. The merchant doesn't learn a new tool. They just tell the store what they want, and the store does it."
+      "caption": "That's Ask BC. The 'so what' for the merchant — they don't learn a new tool, they just talk to the one they already have. The 'so what' for the platform — every BigCommerce store gets an AI operator that reads, writes, and explains, from a single marketplace install. The 'so what' for anyone building this — Codemode plus curated tools plus generative UI is the pattern. It works."
     }
   ]
 }

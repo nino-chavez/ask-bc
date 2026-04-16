@@ -9,6 +9,7 @@ import { renderBlockCatalog } from "./blocks.js";
 import { searchBcDocs } from "./doc-search.js";
 import { resolveStoreCredentials, type StoreCredentials } from "./credentials.js";
 import { Session } from "agents/experimental/memory/session";
+import { jwtVerify } from "jose";
 
 interface Env {
   AskBC: DurableObjectNamespace;
@@ -20,6 +21,8 @@ interface Env {
   UPSTASH_REDIS_REST_URL?: string;
   UPSTASH_REDIS_REST_TOKEN?: string;
   CREDENTIAL_ENCRYPTION_KEY?: string;
+  // Auth — same JWT_KEY the Next.js app uses to sign session tokens [S-1]
+  JWT_KEY?: string;
   // Dev fallback — single-store env vars
   BC_STORE_HASH?: string;
   BC_ACCESS_TOKEN?: string;
@@ -893,8 +896,37 @@ export default {
       );
     }
 
-    // Delegate real chat routes to the agents framework (handles WebSocket
-    // upgrade + /agents/:namespace/:room protocol automatically).
+    // ─── Auth gate for agent routes [S-1] ────────────────────────────
+    // If JWT_KEY is configured, verify the session token before routing
+    // to the agent. The token comes from a ?token= query param (easiest
+    // for WebSocket upgrade, which can't send custom headers in browsers).
+    // In dev without JWT_KEY, skip auth (allows direct WS connections).
+    if (url.pathname.startsWith("/agents/") && env.JWT_KEY) {
+      const token = url.searchParams.get("token");
+      if (!token) {
+        return withCors(
+          new Response(JSON.stringify({ error: "Missing auth token" }), {
+            status: 401,
+            headers: { "content-type": "application/json" },
+          }),
+          env,
+        );
+      }
+      try {
+        const secret = new TextEncoder().encode(env.JWT_KEY);
+        await jwtVerify(token, secret, { algorithms: ["HS256"] });
+      } catch {
+        return withCors(
+          new Response(JSON.stringify({ error: "Invalid or expired token" }), {
+            status: 401,
+            headers: { "content-type": "application/json" },
+          }),
+          env,
+        );
+      }
+    }
+
+    // Delegate to the agents framework (handles WS upgrade + chat protocol).
     const response = await routeAgentRequest(request, env);
     if (response) {
       if (response.status === 101) return response;

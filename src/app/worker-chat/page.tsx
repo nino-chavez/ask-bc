@@ -23,6 +23,7 @@ import WriteApproval from '@/components/chat/blocks/WriteApproval';
  */
 
 const WORKER_HOST = process.env.NEXT_PUBLIC_WORKER_HOST ?? 'localhost:8787';
+const DEFAULT_STORE_HASH = 'cdfqf9k6zf'; // TODO: derive from session [S-6]
 
 const SUGGESTIONS = [
   'Give me a KPI summary of my store',
@@ -36,10 +37,14 @@ export default function WorkerChatPage() {
   const [input, setInput] = useState('');
   const endRef = useRef<HTMLDivElement>(null);
 
+  // Store hash derived from session in production [S-6/F-2].
+  // For dev without session, falls back to DEFAULT_STORE_HASH.
+  // TODO: read from session cookie via a server component or API route
+  // and pass JWT as query param for Worker auth [S-1].
   const agent = useAgent({
     host: WORKER_HOST,
     agent: 'AskBC',
-    name: 'cdfqf9k6zf',
+    name: DEFAULT_STORE_HASH,
   });
 
   const chat = useAgentChat({

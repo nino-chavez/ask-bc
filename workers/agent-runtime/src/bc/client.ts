@@ -11,6 +11,9 @@ import type { paths as LocationPaths } from "./locations.d.ts";
 import type { paths as PromotionPaths } from "./promotions.d.ts";
 import type { paths as MarketingV2Paths } from "./marketing-v2.d.ts";
 import type { paths as ChannelPaths } from "./channels.d.ts";
+import type { paths as ShippingV2Paths } from "./shipping-v2.d.ts";
+import type { paths as TaxSettingsPaths } from "./tax-settings.d.ts";
+import type { paths as StoreInfoPaths } from "./store-info.d.ts";
 
 /**
  * Typed BigCommerce API clients. One per generated OpenAPI spec, grouped
@@ -106,9 +109,13 @@ export function createBcClients(env: BcEnv) {
     promotions: makeClient<PromotionPaths>(env, "v3"),
     channels: makeClient<ChannelPaths>(env, "v3"),
 
+    taxSettings: makeClient<TaxSettingsPaths>(env, "v3"),
+
     // V2 — legacy but required for orders-by-line-item, coupons, store info
     orders: makeClient<OrdersV2Paths>(env, "v2", v2Opts),
     marketing: makeClient<MarketingV2Paths>(env, "v2", v2Opts),
+    shipping: makeClient<ShippingV2Paths>(env, "v2", v2Opts),
+    storeInfo: makeClient<StoreInfoPaths>(env, "v2", v2Opts),
   };
 }
 

@@ -368,6 +368,100 @@ function buildReadTools(env: Env, bc: ReturnType<typeof createBcClients>) {
         ),
     }),
 
+    // ─── Store info ──────────────────────────────────────────────────
+    getStoreInfo: tool({
+      description: "Fetch store metadata: name, domain, currency, timezone, plan, weight/dimension units, logo URL, admin email.",
+      inputSchema: z.object({}),
+      execute: async () =>
+        u(
+          await bc.storeInfo.GET("/store", {
+            params: { header: { Accept: "application/json", "Content-Type": "application/json" } },
+          }),
+          "GET /v2/store",
+        ),
+    }),
+
+    // ─── Shipping ───────────────────────────────────────────────────
+    getShippingZones: tool({
+      description: "List shipping zones. Each zone has a name, list of locations (countries/states), and enabled status. Use to answer 'how is my shipping configured?'",
+      inputSchema: z.object({}),
+      execute: async () =>
+        u(
+          await bc.shipping.GET("/shipping/zones", {
+            params: { header: { Accept: "application/json", "Content-Type": "application/json" } },
+          }),
+          "GET /v2/shipping/zones",
+        ),
+    }),
+
+    getShippingMethods: tool({
+      description: "List shipping methods for a zone. Returns method name, type (flat rate, by weight, etc.), and settings. Use to answer 'what shipping options do customers see?'",
+      inputSchema: z.object({
+        zone_id: z.number().int().positive(),
+      }),
+      execute: async ({ zone_id }) =>
+        u(
+          await bc.shipping.GET("/shipping/zones/{zone_id}/methods", {
+            params: {
+              path: { zone_id },
+              header: { Accept: "application/json", "Content-Type": "application/json" },
+            },
+          }),
+          `GET /v2/shipping/zones/${zone_id}/methods`,
+        ),
+    }),
+
+    // ─── Tax ────────────────────────────────────────────────────────
+    getTaxSettings: tool({
+      description: "Fetch store tax settings: tax-inclusive pricing, fallback strategy, document submission. Use for 'how is my tax configured?' or 'am I collecting tax?'",
+      inputSchema: z.object({}),
+      execute: async () =>
+        u(
+          await bc.taxSettings.GET("/tax/settings", {
+            params: { header: { Accept: "application/json" } },
+          }),
+          "GET /v3/tax/settings",
+        ),
+    }),
+
+    // ─── Refunds (V3) ───────────────────────────────────────────────
+    getOrderRefunds: tool({
+      description: "List refunds for an order. Returns refund amounts, items refunded, payment methods, and timestamps. Use to answer 'was this order refunded?' or 'how much was refunded?'",
+      inputSchema: z.object({
+        order_id: z.number().int().positive(),
+      }),
+      execute: async ({ order_id }) =>
+        u(
+          await bc.ordersV3.GET("/orders/{order_id}/payment_actions/refunds", {
+            params: {
+              path: { order_id },
+              header: { Accept: "application/json" },
+            },
+          }),
+          `GET /v3/orders/${order_id}/payment_actions/refunds`,
+        ),
+    }),
+
+    // ─── Customer addresses ─────────────────────────────────────────
+    getCustomerAddresses: tool({
+      description: "List addresses for customers. Filter by customer_id. Returns street, city, state, zip, country, phone. Use for 'where does this customer ship to?'",
+      inputSchema: z.object({
+        customer_id: z.number().int().positive().optional().describe("Filter by a specific customer"),
+        limit: z.number().int().min(1).max(250).default(50),
+        page: z.number().int().min(1).default(1),
+      }),
+      execute: async ({ customer_id, limit, page }) => {
+        const query: Record<string, unknown> = { limit, page };
+        if (customer_id !== undefined) query["customer_id:in"] = customer_id;
+        return u(
+          await bc.customers.GET("/customers/addresses", {
+            params: { query: query as never },
+          }),
+          "GET /v3/customers/addresses",
+        );
+      },
+    }),
+
     // ─── Documentation search ───────────────────────────────────────
     searchDocumentation: tool({
       description:
@@ -528,6 +622,68 @@ function buildWriteTools(env: Env, bc: ReturnType<typeof createBcClients>, audit
         return result;
       },
     }),
+
+    updateOrderStatus: tool({
+      description:
+        "Update an order's status. Common status_id values: 2=Shipped, 3=Partially Shipped, 5=Cancelled, 9=Awaiting Shipment, 10=Completed, 11=Awaiting Fulfillment. FIRST call with confirmed=false to preview, then confirmed=true after merchant confirms.",
+      inputSchema: z.object({
+        confirmed: z.boolean().default(false),
+        order_id: z.number().int().positive(),
+        status_id: z.number().int().describe("New status ID — see description for common values"),
+      }),
+      execute: async ({ confirmed, order_id, status_id }) => {
+        const statusLabels: Record<number, string> = { 2: "Shipped", 3: "Partially Shipped", 5: "Cancelled", 9: "Awaiting Shipment", 10: "Completed", 11: "Awaiting Fulfillment" };
+        const label = statusLabels[status_id] ?? `status ${status_id}`;
+        if (!confirmed) {
+          return { status: "preview", message: `Will change order #${order_id} to "${label}". Ask the merchant to confirm.`, operation: "updateOrderStatus", args: { order_id, status_id, label } };
+        }
+        const result = u(
+          await bc.orders.PUT("/orders/{order_id}", {
+            params: {
+              path: { order_id },
+              header: { Accept: "application/json", "Content-Type": "application/json" },
+            },
+            body: { status_id } as never,
+          }),
+          `PUT /v2/orders/${order_id}`,
+        );
+        auditLog({ tool: "updateOrderStatus", input: { order_id, status_id, label }, result, timestamp: new Date().toISOString() });
+        return result;
+      },
+    }),
+
+    createProduct: tool({
+      description:
+        "Create a new product in the catalog. Requires name, type, weight, and price at minimum. FIRST call with confirmed=false to preview, then confirmed=true after merchant confirms.",
+      inputSchema: z.object({
+        confirmed: z.boolean().default(false),
+        name: z.string(),
+        type: z.enum(["physical", "digital"]).default("physical"),
+        weight: z.number().default(0).describe("Weight in store's weight unit"),
+        price: z.number().describe("Base retail price"),
+        sale_price: z.number().optional(),
+        sku: z.string().optional(),
+        description: z.string().optional(),
+        categories: z.array(z.number().int()).optional().describe("Category IDs to assign"),
+        inventory_level: z.number().int().optional(),
+        is_visible: z.boolean().default(true),
+      }),
+      execute: async (input) => {
+        const { confirmed, ...args } = input;
+        if (!confirmed) {
+          return { status: "preview", message: `Will create product "${args.name}" at $${args.price}. Ask the merchant to confirm.`, operation: "createProduct", args };
+        }
+        const result = u(
+          await bc.products.POST("/catalog/products", {
+            params: { header: { Accept: "application/json", "Content-Type": "application/json" } },
+            body: args as never,
+          }),
+          "POST /v3/catalog/products",
+        );
+        auditLog({ tool: "createProduct", input: args, result, timestamp: new Date().toISOString() });
+        return result;
+      },
+    }),
   };
 }
 
@@ -546,7 +702,7 @@ You have TWO kinds of tools:
 
 1. **\`execute\`** — runs TypeScript you write in an isolated sandbox. Inside the sandbox you have typed \`codemode.*\` functions that proxy to real BC APIs. This is how you READ data: products, orders, customers, inventory, promotions, etc. Chain calls in ONE script with \`Promise.all\` and in-memory joins.
 
-2. **Top-level write tools** — \`createCoupon\`, \`updateProductInventory\`, \`setProductVisibility\`, \`updateProductPrice\`. These mutate store state. They are NOT available inside the sandbox — you must call them directly as top-level tool calls.
+2. **Top-level write tools** — \`createCoupon\`, \`updateProductInventory\`, \`setProductVisibility\`, \`updateProductPrice\`, \`deleteCoupon\`, \`updateOrderStatus\`, \`createProduct\`. These mutate store state. They are NOT available inside the sandbox — you must call them directly as top-level tool calls.
 
 ## WRITES — TWO-TURN CONFIRMATION
 
@@ -573,7 +729,7 @@ Write tools have a \`confirmed\` parameter. You MUST call them TWICE:
 
 BigCommerce has TWO API versions (V2 and V3) with DIFFERENT response shapes. Getting this wrong is the #1 cause of script errors.
 
-**V3 endpoints** (\`getProducts\`, \`getCategories\`, \`getBrands\`, \`getCustomers\`, \`getProductVariants\`, \`getPromotions\`, \`getChannels\`, \`getInventoryLocations\`):
+**V3 endpoints** (\`getProducts\`, \`getCategories\`, \`getBrands\`, \`getCustomers\`, \`getProductVariants\`, \`getPromotions\`, \`getChannels\`, \`getInventoryLocations\`, \`getTaxSettings\`, \`getOrderRefunds\`, \`getCustomerAddresses\`):
 - Return an **envelope**: \`{ data: T[], meta: { pagination: {...} } }\`
 - Destructure like: \`const { data: products } = await codemode.getProducts(...)\`
 - Numeric fields are **numbers** (\`price\`, \`inventory_level\`, etc.)

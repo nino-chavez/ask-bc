@@ -70,18 +70,40 @@ export default function WorkerChatPanel({
   context,
   suggestions,
   title = 'Ask BC',
-  subtitle = 'Cloudflare Worker · Codemode · Generative UI',
+  subtitle = 'AI Store Assistant',
   compact = false,
 }: WorkerChatPanelProps) {
   const [input, setInput] = useState('');
+  const [agentToken, setAgentToken] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const effectiveSuggestions = suggestions ?? getDefaultSuggestions(context);
+
+  // Fetch a short-lived JWT for the Worker WebSocket connection.
+  // The token is minted server-side from the session cookie and
+  // passed as ?token= on the WebSocket URL for the Worker's auth gate.
+  useEffect(() => {
+    fetch(`/api/agent-token?storeHash=${storeHash}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.token) setAgentToken(data.token);
+      })
+      .catch(() => {
+        // No session (e.g. /worker-chat standalone) — connect without auth.
+        // The Worker skips auth when JWT_KEY is not set.
+        setAgentToken('none');
+      });
+  }, [storeHash]);
 
   const agent = useAgent({
     host: WORKER_HOST,
     agent: 'AskBC',
     name: storeHash,
-  });
+    // Pass the agent token as a query param on the WebSocket URL.
+    // partysocket includes query params in the connection URL.
+    query: agentToken && agentToken !== 'none' ? { token: agentToken } : undefined,
+    // Don't connect until we have the token (or confirmed there's no session)
+    enabled: agentToken !== null,
+  } as Parameters<typeof useAgent>[0]);
 
   const chat = useAgentChat({
     agent,

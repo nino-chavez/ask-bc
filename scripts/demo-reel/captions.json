@@ -1,7 +1,6 @@
 {
-  "voice": "coral",
-  "model": "gpt-4o-mini-tts",
-  "instructions": "You're giving a live product demo to a small group of engineers and product leaders. Conversational, not scripted. You're genuinely excited about what you built but not selling — you're showing. After each feature, land the 'so what' — why does this matter functionally for the merchant, technically for the platform, and architecturally for anyone building agentic commerce tools. Vary your pacing: faster when building momentum, slower when making a key point. Use natural contractions.",
+  "voice": "josh",
+  "model": "eleven_multilingual_v2",
   "defaultHoldSeconds": 0.5,
   "scenes": [
     {

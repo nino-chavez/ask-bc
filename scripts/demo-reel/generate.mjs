@@ -33,26 +33,46 @@ const OUT_DIR = path.join(ROOT, 'out');
 for (const d of [AUDIO_DIR, FRAMES_DIR, CLIPS_DIR, OUT_DIR]) fs.mkdirSync(d, { recursive: true });
 
 // ─── env ───────────────────────────────────────────────────────────
-function loadOpenAIKey() {
-	if (process.env.OPENAI_API_KEY) return process.env.OPENAI_API_KEY;
-	const rallyEnv = path.resolve(process.env.HOME || '', 'Workspace/dev/apps/rally-hq/.env.local');
-	if (!fs.existsSync(rallyEnv)) {
-		throw new Error('OPENAI_API_KEY not set and rally-hq .env.local not found');
+// ─── env ───────────────────────────────────────────────────────────
+// Supports two TTS backends:
+//   1. ElevenLabs (default if ELEVENLABS_API_KEY is set)
+//   2. OpenAI (fallback)
+
+function loadKey(name, searchPaths = []) {
+	if (process.env[name]) return process.env[name];
+	for (const p of searchPaths) {
+		if (!fs.existsSync(p)) continue;
+		const match = fs.readFileSync(p, 'utf-8').match(new RegExp(`^${name}=(.+)$`, 'm'));
+		if (match) return match[1].trim().replace(/^["']|["']$/g, '');
 	}
-	const content = fs.readFileSync(rallyEnv, 'utf-8');
-	const match = content.match(/^OPENAI_API_KEY=(.+)$/m);
-	if (!match) throw new Error('OPENAI_API_KEY not found in rally-hq .env.local');
-	return match[1].trim().replace(/^["']|["']$/g, '');
+	return null;
 }
 
-const OPENAI_API_KEY = loadOpenAIKey();
+const rallyEnv = path.resolve(process.env.HOME || '', 'Workspace/dev/apps/rally-hq/.env.local');
+const ELEVENLABS_API_KEY = loadKey('ELEVENLABS_API_KEY', [rallyEnv, path.join(ROOT, '.env')]);
+const OPENAI_API_KEY = loadKey('OPENAI_API_KEY', [rallyEnv]);
+const TTS_BACKEND = ELEVENLABS_API_KEY ? 'elevenlabs' : 'openai';
+
+if (!ELEVENLABS_API_KEY && !OPENAI_API_KEY) {
+	throw new Error('Set ELEVENLABS_API_KEY (preferred) or OPENAI_API_KEY for TTS');
+}
 
 // ─── config ────────────────────────────────────────────────────────
 const captions = JSON.parse(fs.readFileSync(path.join(ROOT, 'captions.json'), 'utf-8'));
-const VOICE = process.env.TTS_VOICE || captions.voice || 'ash';
-const TTS_MODEL = process.env.TTS_MODEL || captions.model || 'gpt-4o-mini-tts';
+const VOICE = process.env.TTS_VOICE || captions.voice || 'coral';
+const TTS_MODEL = process.env.TTS_MODEL || captions.model || 'eleven_multilingual_v2';
 const TTS_INSTRUCTIONS = captions.instructions || null;
 const DEFAULT_HOLD_S = captions.defaultHoldSeconds ?? 0.4;
+
+// ElevenLabs voice IDs for pre-built voices good for demos/narration
+const ELEVENLABS_VOICES = {
+	'george': 'JBFqnCBsd6RMkjVDRZzb',    // British, warm, narration
+	'rachel': '21m00Tcm4TlvDq8ikWAM',     // American, clear, professional
+	'adam': 'pNInz6obpgDQGcFmaJgB',        // American, deep, confident
+	'josh': 'TxGEqnHWrfWFTfGW9XjX',       // American, conversational
+	'sam': 'yoZ06aMxZJJ28mfd3POQ',         // American, casual
+	'charlie': 'IKne3meq5aSn9XLyUdCD',     // Australian, friendly
+};
 
 // Landscape 16:10 matching the recaptured Playwright viewport (1440×900).
 // Screenshots composite full-bleed; captions overlay as a translucent band at the bottom.
@@ -73,13 +93,44 @@ function sh(cmd, args, opts = {}) {
 }
 
 async function generateTTS(text, outputPath) {
+	if (TTS_BACKEND === 'elevenlabs') {
+		return generateTTS_ElevenLabs(text, outputPath);
+	}
+	return generateTTS_OpenAI(text, outputPath);
+}
+
+async function generateTTS_ElevenLabs(text, outputPath) {
+	const voiceId = ELEVENLABS_VOICES[VOICE.toLowerCase()] || VOICE;
+	const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+		method: 'POST',
+		headers: {
+			'xi-api-key': ELEVENLABS_API_KEY,
+			'Content-Type': 'application/json',
+			'Accept': 'audio/mpeg',
+		},
+		body: JSON.stringify({
+			text,
+			model_id: TTS_MODEL,
+			voice_settings: {
+				stability: 0.4,          // lower = more expressive
+				similarity_boost: 0.75,
+				style: 0.35,             // conversational style
+				use_speaker_boost: true,
+			},
+		}),
+	});
+	if (!res.ok) throw new Error(`ElevenLabs TTS failed (${res.status}): ${await res.text()}`);
+	const buf = Buffer.from(await res.arrayBuffer());
+	fs.writeFileSync(outputPath, buf);
+}
+
+async function generateTTS_OpenAI(text, outputPath) {
 	const payload = {
 		model: TTS_MODEL,
 		voice: VOICE,
 		input: text,
 		response_format: 'mp3',
 	};
-	// gpt-4o-mini-tts accepts an `instructions` field that steers style/pacing
 	if (TTS_INSTRUCTIONS && TTS_MODEL.startsWith('gpt-4o')) {
 		payload.instructions = TTS_INSTRUCTIONS;
 	}
@@ -91,7 +142,7 @@ async function generateTTS(text, outputPath) {
 		},
 		body: JSON.stringify(payload),
 	});
-	if (!res.ok) throw new Error(`TTS failed (${res.status}): ${await res.text()}`);
+	if (!res.ok) throw new Error(`OpenAI TTS failed (${res.status}): ${await res.text()}`);
 	const buf = Buffer.from(await res.arrayBuffer());
 	fs.writeFileSync(outputPath, buf);
 }
@@ -212,7 +263,7 @@ async function main() {
 	const skipFrames = process.env.SKIP_FRAMES === '1';
 
 	console.log(`\nDemo reel generator`);
-	console.log(`  voice: ${VOICE} (${TTS_MODEL})`);
+	console.log(`  voice: ${VOICE} (${TTS_BACKEND}: ${TTS_MODEL})`);
 	console.log(`  scenes: ${captions.scenes.length}`);
 	console.log(`  output: ${path.join(OUT_DIR, 'demo-reel.mp4')}\n`);
 

@@ -1,4 +1,5 @@
 import { getRedis } from './redis';
+import crypto from 'crypto';
 
 interface StoreCredentials {
   storeHash: string;
@@ -7,8 +8,49 @@ interface StoreCredentials {
   adminId: number;
 }
 
+interface EncryptedStoreCredentials {
+  storeHash: string;
+  scope: string;
+  adminId: number;
+  encryptedAccessToken: string;
+}
+
 const STORE_KEY_PREFIX = 'ask-bc:store:';
 const USER_KEY_PREFIX = 'ask-bc:user:';
+
+// ─── Token encryption at rest [S-7] ────────────────────────────────
+// AES-256-GCM. Key shared between Vercel (writes) and Worker (reads).
+// When CREDENTIAL_ENCRYPTION_KEY is set, tokens are encrypted before
+// being written to Redis. The Worker's credentials.ts decrypts them.
+
+function getEncryptionKey(): Buffer | null {
+  const hex = process.env.CREDENTIAL_ENCRYPTION_KEY;
+  if (!hex || hex.length !== 64) return null; // 32 bytes = 64 hex chars
+  return Buffer.from(hex, 'hex');
+}
+
+function encryptToken(plaintext: string): string {
+  const key = getEncryptionKey();
+  if (!key) throw new Error('CREDENTIAL_ENCRYPTION_KEY not set or invalid');
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return JSON.stringify({
+    iv: iv.toString('base64'),
+    ciphertext: ciphertext.toString('base64'),
+    tag: tag.toString('base64'),
+  });
+}
+
+function decryptToken(encryptedJson: string): string {
+  const key = getEncryptionKey();
+  if (!key) throw new Error('CREDENTIAL_ENCRYPTION_KEY not set or invalid');
+  const { iv, ciphertext, tag } = JSON.parse(encryptedJson);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64'));
+  decipher.setAuthTag(Buffer.from(tag, 'base64'));
+  return decipher.update(Buffer.from(ciphertext, 'base64')) + decipher.final('utf8');
+}
 
 // In-memory fallback for local dev (lost on restart, but survives hot reloads in dev)
 // In production, Redis is REQUIRED.
@@ -20,6 +62,12 @@ const CREDENTIALS_FILE = '.credentials.json';
 
 function getFileStore(): Record<string, string> {
   if (fileStore) return fileStore;
+  // File-based credential storage is dev-only [S-7 hardening].
+  // In production, Redis is the sole persistence layer.
+  if (process.env.NODE_ENV !== 'development') {
+    fileStore = {};
+    return fileStore;
+  }
   try {
     const fs = require('fs');
     const path = require('path');
@@ -34,6 +82,7 @@ function getFileStore(): Record<string, string> {
 }
 
 function writeFileStore(data: Record<string, string>): void {
+  if (process.env.NODE_ENV !== 'development') return; // never write in production
   fileStore = data;
   try {
     const fs = require('fs');
@@ -77,13 +126,38 @@ async function delKey(key: string): Promise<void> {
 }
 
 export async function saveStoreCredentials(creds: StoreCredentials): Promise<void> {
-  await setKey(`${STORE_KEY_PREFIX}${creds.storeHash}`, JSON.stringify(creds));
+  const encKey = getEncryptionKey();
+  if (encKey) {
+    // Encrypt the access token before storing [S-7]
+    const encrypted: EncryptedStoreCredentials = {
+      storeHash: creds.storeHash,
+      scope: creds.scope,
+      adminId: creds.adminId,
+      encryptedAccessToken: encryptToken(creds.accessToken),
+    };
+    await setKey(`${STORE_KEY_PREFIX}${creds.storeHash}`, JSON.stringify(encrypted));
+  } else {
+    // No encryption key — store plaintext (dev only)
+    await setKey(`${STORE_KEY_PREFIX}${creds.storeHash}`, JSON.stringify(creds));
+  }
 }
 
 export async function getStoreCredentials(storeHash: string): Promise<StoreCredentials | null> {
   const data = await getKey(`${STORE_KEY_PREFIX}${storeHash}`);
   if (!data) return null;
-  return typeof data === 'string' ? JSON.parse(data) : data as unknown as StoreCredentials;
+  const parsed = typeof data === 'string' ? JSON.parse(data) : data as Record<string, unknown>;
+
+  // If encrypted, decrypt the access token [S-7]
+  if ('encryptedAccessToken' in parsed && typeof parsed.encryptedAccessToken === 'string') {
+    return {
+      storeHash: parsed.storeHash as string,
+      scope: parsed.scope as string,
+      adminId: parsed.adminId as number,
+      accessToken: decryptToken(parsed.encryptedAccessToken),
+    };
+  }
+
+  return parsed as unknown as StoreCredentials;
 }
 
 export async function deleteStoreCredentials(storeHash: string): Promise<void> {

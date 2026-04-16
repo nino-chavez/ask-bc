@@ -990,10 +990,10 @@ export default {
     }
 
     // ─── Auth gate for agent routes [S-1] ────────────────────────────
-    // If JWT_KEY is configured, verify the session token before routing
-    // to the agent. The token comes from a ?token= query param (easiest
-    // for WebSocket upgrade, which can't send custom headers in browsers).
-    // In dev without JWT_KEY, skip auth (allows direct WS connections).
+    // Verify the session JWT AND validate the storeHash claim matches
+    // the DO room the client is connecting to. Without this check, a
+    // merchant authenticated for store A could connect to store B's DO
+    // if they knew the store hash.
     if (url.pathname.startsWith("/agents/") && env.JWT_KEY) {
       const token = url.searchParams.get("token");
       if (!token) {
@@ -1007,7 +1007,25 @@ export default {
       }
       try {
         const secret = new TextEncoder().encode(env.JWT_KEY);
-        await jwtVerify(token, secret, { algorithms: ["HS256"] });
+        const { payload } = await jwtVerify(token, secret, { algorithms: ["HS256"] });
+
+        // Extract room name from URL: /agents/{namespace}/{room}/...
+        const pathParts = url.pathname.split("/").filter(Boolean);
+        const urlRoom = pathParts[2]; // agents / ask-b-c / {room}
+        const jwtStoreHash = (payload as { storeHash?: string }).storeHash;
+
+        if (jwtStoreHash && urlRoom && jwtStoreHash !== urlRoom) {
+          return withCors(
+            new Response(
+              JSON.stringify({
+                error: "Store hash mismatch",
+                detail: "Your session is for a different store than the one you're trying to access.",
+              }),
+              { status: 403, headers: { "content-type": "application/json" } },
+            ),
+            env,
+          );
+        }
       } catch {
         return withCors(
           new Response(JSON.stringify({ error: "Invalid or expired token" }), {

@@ -739,16 +739,33 @@ export class AskBC extends Think<Env> {
    * importantly, retries after a tool error. That's exactly where Sonnet's
    * deeper reasoning and error-recovery instincts earn their extra cost.
    */
-  async beforeTurn(ctx: { continuation: boolean }): Promise<{ model: LanguageModel } | void> {
-    // Ensure credentials are resolved before the turn runs any tools
+  async beforeTurn(ctx: {
+    continuation: boolean;
+    body?: Record<string, unknown>;
+    system: string;
+  }): Promise<{ model: LanguageModel; system?: string } | void> {
     await this.ensureCredentials();
+
+    // Inject entity context from the client's body param [F-4]
+    const entityContext = ctx.body?.entityContext as
+      | { type: string; id: string }
+      | undefined;
+    const contextAddendum = entityContext
+      ? `\n\n## CURRENT CONTEXT\nThe merchant is viewing ${entityContext.type} #${entityContext.id}. Every question in this conversation is implicitly about this ${entityContext.type}. When fetching data, scope queries to this entity.`
+      : "";
 
     if (ctx.continuation) {
       const anthropic = createAnthropic({ apiKey: this.env.ANTHROPIC_API_KEY });
       this._lastModelUsed.push("sonnet-4-6");
-      return { model: anthropic("claude-sonnet-4-6") };
+      return {
+        model: anthropic("claude-sonnet-4-6"),
+        ...(contextAddendum ? { system: ctx.system + contextAddendum } : {}),
+      };
     }
     this._lastModelUsed.push("haiku-4-5");
+    if (contextAddendum) {
+      return { model: this.getModel(), system: ctx.system + contextAddendum };
+    }
   }
 
   getSystemPrompt() {

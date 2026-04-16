@@ -1,7 +1,7 @@
 'use client';
 
 import { useParams } from 'next/navigation';
-import ChatPage from '@/components/chat/ChatPage';
+import WorkerChatPanel from '@/components/chat/WorkerChatPanel';
 
 export default function OrderExtensionPage() {
   const params = useParams();
@@ -9,9 +9,14 @@ export default function OrderExtensionPage() {
   const orderId = params.id as string;
 
   return (
-    <ChatPage
-      storeHash={storeHash}
-      context={{ type: 'order', id: orderId }}
-    />
+    <div style={{ height: '100vh' }}>
+      <WorkerChatPanel
+        storeHash={storeHash}
+        context={{ type: 'order', id: orderId }}
+        title={`Order #${orderId}`}
+        subtitle="Ask BC · Order context"
+        compact
+      />
+    </div>
   );
 }

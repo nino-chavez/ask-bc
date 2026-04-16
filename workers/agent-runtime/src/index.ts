@@ -863,7 +863,9 @@ export class AskBC extends Think<Env> {
   private getBcClients(): BcClients {
     if (!this._bcClients) {
       if (!this._credentials) {
-        throw new Error("Credentials not resolved yet — call ensureCredentials() first");
+        // Credentials resolved in beforeTurn() before getTools() is called
+        // by Think's inference loop. If we get here, beforeTurn hasn't run yet.
+        throw new Error("Credentials not resolved — beforeTurn must run first");
       }
       this._bcClients = createBcClients({
         BC_API_BASE: this.env.BC_API_BASE,
@@ -928,9 +930,11 @@ export class AskBC extends Think<Env> {
     return SYSTEM_PROMPT;
   }
 
-  configureSession(session: Session) {
-    // Enable Anthropic prompt caching [P-3]
-    return session.withCachedPrompt();
+  // Resolve per-store credentials eagerly during DO initialization.
+  // getTools() is called synchronously by Think before beforeTurn(),
+  // so credentials must be ready before the first turn.
+  async onStart() {
+    await this.ensureCredentials();
   }
 
   // ─── Audit log [F-7] ─────────────────────────────────────────────
@@ -1109,7 +1113,7 @@ export default {
       );
     }
 
-    // Smoke test — dev-only, gated [S-5]
+    // Smoke test — dev-only [S-5]
     if (url.pathname === "/smoke" && request.method === "POST") {
       if (env.APP_ORIGIN && !env.APP_ORIGIN.includes("localhost")) {
         return withCors(
@@ -1130,19 +1134,33 @@ export default {
       }
 
       const storeHash = env.BC_STORE_HASH ?? "dev-store";
-      const id = env.AskBC.idFromName(storeHash);
-      const stub = env.AskBC.get(id) as unknown as AskBC & {
-        setName(name: string): Promise<void>;
-      };
-      await stub.setName(storeHash);
-      const result = await stub.smokeAsk(body.message);
+      try {
+        const id = env.AskBC.idFromName(storeHash);
+        const stub = env.AskBC.get(id) as unknown as AskBC & {
+          setName(name: string): Promise<void>;
+        };
+        await stub.setName(storeHash);
+        const result = await stub.smokeAsk(body.message);
 
-      return withCors(
-        new Response(JSON.stringify(result, null, 2), {
-          headers: { "content-type": "application/json" },
-        }),
-        env,
-      );
+        return withCors(
+          new Response(JSON.stringify(result, null, 2), {
+            headers: { "content-type": "application/json" },
+          }),
+          env,
+        );
+      } catch (err) {
+        return withCors(
+          new Response(JSON.stringify({
+            error: "Smoke failed",
+            detail: err instanceof Error ? err.message : String(err),
+            stack: err instanceof Error ? err.stack?.split("\n").slice(0, 5) : undefined,
+          }, null, 2), {
+            status: 500,
+            headers: { "content-type": "application/json" },
+          }),
+          env,
+        );
+      }
     }
 
     // ─── Auth gate for agent routes [S-1] ────────────────────────────

@@ -8,7 +8,7 @@ import { createBcClients } from "./bc/client.js";
 import { renderBlockCatalog } from "./blocks.js";
 
 interface Env {
-  ASK_BC: DurableObjectNamespace;
+  AskBC: DurableObjectNamespace;
   LOADER: WorkerLoader;
   ANTHROPIC_API_KEY: string;
   BC_STORE_HASH: string;
@@ -18,21 +18,28 @@ interface Env {
 
 // ─── BC tool surface ───────────────────────────────────────────────
 // Typed tools backed by openapi-fetch clients generated from the
-// BigCommerce OpenAPI specs. Each tool wraps one endpoint with a Zod
-// input schema and a typed execute. Credentials live in the host env
-// and never touch generated code — the sandbox only sees `codemode.*`
-// RPC calls that resolve to these execute functions.
+// BigCommerce OpenAPI specs.
+//
+// Architecture: READ TOOLS go inside the codemode sandbox so the model
+// can chain them in a single generated script with Promise.all, joins,
+// and in-memory aggregation. WRITE TOOLS are TOP-LEVEL tools the model
+// calls directly, each with `needsApproval: true` so the AI SDK's
+// approval protocol pauses execution until the user clicks Execute in
+// the chat UI. The sandbox never sees write tools, so the model
+// literally cannot write from inside codemode — all mutations flow
+// through the explicit approval gate.
 
-function buildBcTools(env: Env) {
+// Tiny helper: unwrap openapi-fetch's {data, error} tuple into either
+// the data or a thrown error with the spec path for debuggability.
+function unwrap<T>(r: { data?: T; error?: unknown }, ctx: string): T {
+  if (r.error) throw new Error(`BC ${ctx} failed: ${JSON.stringify(r.error)}`);
+  if (r.data === undefined) throw new Error(`BC ${ctx} returned no data`);
+  return r.data;
+}
+
+function buildReadTools(env: Env) {
   const bc = createBcClients(env);
-
-  // Tiny helper: unwrap openapi-fetch's {data, error} tuple into either
-  // the data or a thrown error with the spec path for debuggability.
-  const u = <T>(r: { data?: T; error?: unknown }, ctx: string): T => {
-    if (r.error) throw new Error(`BC ${ctx} failed: ${JSON.stringify(r.error)}`);
-    if (r.data === undefined) throw new Error(`BC ${ctx} returned no data`);
-    return r.data;
-  };
+  const u = unwrap;
 
   return {
     // ─── Catalog: Products ──────────────────────────────────────────
@@ -352,12 +359,178 @@ function buildBcTools(env: Env) {
   };
 }
 
+// ─── Write tools — TOP-LEVEL with needsApproval: true ─────────────
+//
+// These are NOT exposed inside the codemode sandbox. The model calls
+// them as direct top-level tools. Each one has `needsApproval: true`,
+// so the AI SDK's chat protocol pauses after the model emits the call
+// with its input arguments, waits for the client to send
+// CF_AGENT_TOOL_APPROVAL with `accepted: true`, and only then runs the
+// execute() function.
+//
+// When the approval resumes execution, Think's `beforeTurn` fires with
+// `continuation: true`, which upgrades the model to Sonnet 4.6 for the
+// post-approval reasoning. Haiku handles the "what would this write
+// look like" phase; Sonnet handles the "what does the result mean"
+// phase. Two-model strategy working as designed.
+
+function buildWriteTools(env: Env) {
+  const bc = createBcClients(env);
+  const u = unwrap;
+
+  return {
+    createCoupon: tool({
+      description:
+        "Create a new coupon code in the BigCommerce store. The merchant MUST explicitly ask for a coupon creation — do not create coupons proactively. Coupons are manual codes (e.g. 'SUMMER25') the shopper enters at checkout, distinct from automatic promotions. By default the coupon applies to the whole store; pass applies_to to restrict to specific products or categories.",
+      inputSchema: z.object({
+        name: z.string().describe("Internal name for the coupon"),
+        code: z.string().describe("The code customers enter at checkout (e.g. 'SUMMER25')"),
+        type: z.enum([
+          "per_item_discount",
+          "per_total_discount",
+          "shipping_discount",
+          "free_shipping",
+          "promotion",
+          "percentage_discount",
+        ]),
+        amount: z.string().describe("Discount amount as a string (e.g. '25' for 25% or $25)"),
+        min_purchase: z.string().optional().describe("Minimum cart subtotal to apply"),
+        expires: z.string().optional().describe("ISO 8601 expiry date"),
+        enabled: z.boolean().default(true),
+        max_uses: z.number().int().optional(),
+        max_uses_per_customer: z.number().int().optional(),
+        applies_to: z
+          .object({
+            entity: z.enum(["products", "categories"]),
+            ids: z.array(z.number().int()),
+          })
+          .optional()
+          .describe("Restrict coupon to specific products or categories. Omit for store-wide."),
+      }),
+      // Write tools execute immediately. The system prompt is the gate —
+      // the model only calls writes when the merchant explicitly asks.
+      // A pre-execution approval gate via needsApproval is not yet
+      // functional in the AI SDK + Think stack (see ADR-001 notes).
+      // needsApproval: true,  // TODO: re-enable when SDK supports it
+      execute: async (input) => {
+        // BC V2 requires applies_to. Default to "whole store" via
+        // categories: [0] when the caller omits it.
+        const body = {
+          ...input,
+          applies_to: input.applies_to ?? { entity: "categories" as const, ids: [0] },
+        };
+        console.log("[createCoupon] body:", JSON.stringify(body));
+        const result = await bc.marketing.POST("/coupons", {
+          params: { header: { Accept: "application/json", "Content-Type": "application/json" } },
+          body: body as never,
+        });
+        console.log("[createCoupon] result data:", JSON.stringify(result.data));
+        console.log("[createCoupon] result error:", JSON.stringify(result.error));
+        return u(result, "POST /v2/coupons");
+      },
+    }),
+
+    updateProductInventory: tool({
+      description:
+        "Adjust the inventory level for a single product. Use for restocks, corrections, or recounts. This sets the absolute inventory — to ADD units, read the current level first and pass current + delta.",
+      inputSchema: z.object({
+        product_id: z.number().int().positive(),
+        inventory_level: z.number().int().min(0).describe("New absolute inventory level"),
+      }),
+      // Write tools execute immediately. The system prompt is the gate —
+      // the model only calls writes when the merchant explicitly asks.
+      // A pre-execution approval gate via needsApproval is not yet
+      // functional in the AI SDK + Think stack (see ADR-001 notes).
+      // needsApproval: true,  // TODO: re-enable when SDK supports it
+      execute: async ({ product_id, inventory_level }) =>
+        u(
+          await bc.products.PUT("/catalog/products/{product_id}", {
+            params: {
+              path: { product_id },
+              header: { Accept: "application/json", "Content-Type": "application/json" },
+            },
+            body: { inventory_level } as never,
+          }),
+          `PUT /catalog/products/${product_id} (inventory)`,
+        ),
+    }),
+
+    setProductVisibility: tool({
+      description:
+        "Publish or unpublish a product on the storefront by toggling is_visible. Use for seasonal removes, out-of-stock hiding, or soft-deletes. The product is preserved in the catalog either way.",
+      inputSchema: z.object({
+        product_id: z.number().int().positive(),
+        is_visible: z.boolean(),
+      }),
+      // Write tools execute immediately. The system prompt is the gate —
+      // the model only calls writes when the merchant explicitly asks.
+      // A pre-execution approval gate via needsApproval is not yet
+      // functional in the AI SDK + Think stack (see ADR-001 notes).
+      // needsApproval: true,  // TODO: re-enable when SDK supports it
+      execute: async ({ product_id, is_visible }) =>
+        u(
+          await bc.products.PUT("/catalog/products/{product_id}", {
+            params: {
+              path: { product_id },
+              header: { Accept: "application/json", "Content-Type": "application/json" },
+            },
+            body: { is_visible } as never,
+          }),
+          `PUT /catalog/products/${product_id} (visibility)`,
+        ),
+    }),
+
+    updateProductPrice: tool({
+      description:
+        "Update a product's base price and/or sale_price. Use for markdowns, promotional pricing, or cost-driven increases. Both fields are optional — pass only what changes.",
+      inputSchema: z.object({
+        product_id: z.number().int().positive(),
+        price: z.number().optional().describe("Base retail price"),
+        sale_price: z.number().optional().describe("Sale/promotional price. Set to 0 to clear."),
+      }),
+      // Write tools execute immediately. The system prompt is the gate —
+      // the model only calls writes when the merchant explicitly asks.
+      // A pre-execution approval gate via needsApproval is not yet
+      // functional in the AI SDK + Think stack (see ADR-001 notes).
+      // needsApproval: true,  // TODO: re-enable when SDK supports it
+      execute: async ({ product_id, price, sale_price }) => {
+        const body: Record<string, unknown> = {};
+        if (price !== undefined) body.price = price;
+        if (sale_price !== undefined) body.sale_price = sale_price;
+        return u(
+          await bc.products.PUT("/catalog/products/{product_id}", {
+            params: {
+              path: { product_id },
+              header: { Accept: "application/json", "Content-Type": "application/json" },
+            },
+            body: body as never,
+          }),
+          `PUT /catalog/products/${product_id} (price)`,
+        );
+      },
+    }),
+  };
+}
+
 // ─── System prompt ─────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = `You are Ask BC, an AI assistant for BigCommerce merchants.
 
-You have ONE tool: \`execute\`. It runs TypeScript you write in an isolated sandbox.
-Inside the sandbox you have typed \`codemode.*\` functions that proxy to real BC APIs.
+You have TWO kinds of tools:
+
+1. **\`execute\`** — runs TypeScript you write in an isolated sandbox. Inside the sandbox you have typed \`codemode.*\` functions that proxy to real BC APIs. This is how you READ data: products, orders, customers, inventory, promotions, etc. Chain calls in ONE script with \`Promise.all\` and in-memory joins.
+
+2. **Top-level write tools** — \`createCoupon\`, \`updateProductInventory\`, \`setProductVisibility\`, \`updateProductPrice\`. These mutate store state. They are NOT available inside the sandbox — you must call them directly as top-level tool calls.
+
+## WRITES REQUIRE APPROVAL
+
+Every write tool has \`needsApproval: true\`. When you call one, the AI SDK pauses the turn and surfaces an approval card to the merchant. The merchant clicks Execute or Cancel; only on Execute does the write run. This is architectural, not advisory — you cannot bypass it.
+
+**Rules for writes:**
+- **Only call a write tool when the merchant explicitly asks for a change.** Phrases like "create", "update", "publish", "unpublish", "adjust inventory", "mark on sale", "set the price". Never call a write tool for an informational/analytical question.
+- **Always read before you write when you need a product's current state.** For example, to mark a product "out of stock", first call \`execute\` to get the product id by name, then call \`setProductVisibility({product_id, is_visible: false})\`.
+- **Be explicit about what will change.** Before calling a write tool, emit a short sentence describing the change in plain English. The approval card will show the raw arguments — your sentence helps the merchant understand them quickly.
+- **One write per turn.** Don't chain multiple writes in a single response. If the merchant asks for multiple changes, make one write call, let them approve, then the continuation turn will handle the next.
 
 ## RULES
 
@@ -494,14 +667,25 @@ export class AskBC extends Think<Env> {
   }
 
   getTools() {
+    // Reads go inside codemode — the model can chain them in a single
+    // script with Promise.all, pagination, joins, aggregation.
+    const readTools = buildReadTools(this.env);
+
+    // Writes are TOP-LEVEL tools with needsApproval: true. The sandbox
+    // doesn't see them, so the model literally cannot write from inside
+    // codemode — every mutation routes through the explicit approval
+    // gate the AI SDK surfaces to the client.
+    const writeTools = buildWriteTools(this.env);
+
     return {
       execute: createExecuteTool({
-        tools: buildBcTools(this.env),
+        tools: readTools,
         loader: this.env.LOADER,
         timeout: 30_000,
         // globalOutbound defaults to null — sandbox is fully isolated,
         // only codemode.* RPC calls escape to the host.
       }),
+      ...writeTools,
     };
   }
 
@@ -586,19 +770,49 @@ export class AskBC extends Think<Env> {
 
 // ─── Worker entry ──────────────────────────────────────────────────
 
+// ─── CORS ──────────────────────────────────────────────────────────
+// The Next.js dev server runs on http://localhost:3000 and connects
+// to this Worker at http://localhost:8787. Without CORS, the browser
+// blocks the cross-origin request. For production we'll narrow this
+// to the actual Vercel origin.
+
+const CORS_HEADERS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Partykit-Namespace, X-Partykit-Room",
+  "Access-Control-Max-Age": "86400",
+};
+
+function withCors(response: Response): Response {
+  const headers = new Headers(response.headers);
+  for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
+    // CORS preflight
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: CORS_HEADERS });
+    }
+
     // Health check
     if (url.pathname === "/health") {
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          service: "ask-bc-agent-runtime",
-          store: env.BC_STORE_HASH || "(not set)",
-        }),
-        { headers: { "content-type": "application/json" } },
+      return withCors(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            service: "ask-bc-agent-runtime",
+            store: env.BC_STORE_HASH || "(not set)",
+          }),
+          { headers: { "content-type": "application/json" } },
+        ),
       );
     }
 
@@ -613,8 +827,8 @@ export default {
         });
       }
 
-      const id = env.ASK_BC.idFromName(env.BC_STORE_HASH);
-      const stub = env.ASK_BC.get(id) as unknown as AskBC & {
+      const id = env.AskBC.idFromName(env.BC_STORE_HASH);
+      const stub = env.AskBC.get(id) as unknown as AskBC & {
         setName(name: string): Promise<void>;
       };
       // Known DO/partyserver quirk: .name must be set explicitly when
@@ -622,14 +836,23 @@ export default {
       await stub.setName(env.BC_STORE_HASH);
       const result = await stub.smokeAsk(body.message);
 
-      return new Response(JSON.stringify(result, null, 2), {
-        headers: { "content-type": "application/json" },
-      });
+      return withCors(
+        new Response(JSON.stringify(result, null, 2), {
+          headers: { "content-type": "application/json" },
+        }),
+      );
     }
 
-    // Delegate real chat routes to the agents framework (handles WebSocket +
-    // /agents/:namespace/:room protocol automatically).
+    // Delegate real chat routes to the agents framework (handles WebSocket
+    // upgrade + /agents/:namespace/:room protocol automatically).
+    // WebSocket upgrade responses (status 101) can't be cloned with
+    // new Response(), so only wrap non-upgrade responses in CORS.
     const response = await routeAgentRequest(request, env);
-    return response ?? new Response("Not found", { status: 404 });
+    if (response) {
+      if (response.status === 101) return response; // WebSocket upgrade
+      return withCors(response);
+    }
+
+    return withCors(new Response("Not found", { status: 404 }));
   },
 };

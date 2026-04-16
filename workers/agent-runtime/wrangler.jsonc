@@ -11,7 +11,11 @@
   "durable_objects": {
     "bindings": [
       {
-        "name": "ASK_BC",
+        // Binding name MUST match class name exactly so
+        // camelCaseToKebabCase(bindingName) produces the same result as
+        // camelCaseToKebabCase(className) — this is how the client's
+        // useAgent({agent: "AskBC"}) namespace resolves to the DO.
+        "name": "AskBC",
         "class_name": "AskBC"
       }
     ]

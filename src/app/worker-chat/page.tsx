@@ -1,107 +1,91 @@
 'use client';
 
 import { useState, useRef, useEffect, type FormEvent } from 'react';
+import { useAgent } from 'agents/react';
+import { useAgentChat, getToolPartState, getToolCallId, getToolInput } from '@cloudflare/ai-chat/react';
+import type { UIMessage } from 'ai';
 import { BlockRenderer } from '@/components/chat/blocks';
+import WriteApproval from '@/components/chat/blocks/WriteApproval';
 
 /**
- * Dev-only chat surface that talks to the Cloudflare Worker agent
- * runtime via /api/worker-proxy. Uses the BlockRenderer so responses
- * with fenced `block` code segments render as real React components
- * inline with the text.
+ * Worker-backed chat surface using the native agents WebSocket protocol
+ * via useAgent + useAgentChat. Connects directly browser → Worker on
+ * localhost:8787, bypassing the Next.js API layer. This is the path
+ * that enables streaming, stream resumption, and — most importantly —
+ * native server-side tool approval via CF_AGENT_TOOL_APPROVAL events.
  *
- * This page is the demo surface for the Codemode + Generative UI
- * migration. It bypasses BC OAuth and the iframe shell — just plain
- * chat + blocks against the Worker's /smoke endpoint.
- *
- * Visit /worker-chat with the Worker running at localhost:8787
- * (wrangler dev in workers/agent-runtime/).
+ * When a write tool is invoked, the server pauses the turn and the
+ * AI SDK surfaces the tool part in `waiting-approval` state. The
+ * WriteApproval component renders Execute/Cancel buttons; clicking
+ * Execute calls addToolOutput with approved: true, the server resumes,
+ * and Think's beforeTurn(continuation: true) hook upgrades the model
+ * to Sonnet 4.6 for the post-approval reasoning.
  */
 
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  modelsUsed?: string[];
-  durationMs?: number;
-}
-
-interface WorkerResponse {
-  text: string;
-  modelsUsed?: string[];
-  toolCalls?: unknown[];
-  timedOut?: boolean;
-  error?: string;
-  detail?: string;
-  hint?: string;
-}
+const WORKER_HOST = process.env.NEXT_PUBLIC_WORKER_HOST ?? 'localhost:8787';
 
 const SUGGESTIONS = [
   'Give me a KPI summary of my store',
   'Show me my 5 most expensive products',
-  'What are my 5 most recent completed orders with line items?',
   'Which products are low on inventory?',
-  'Break down customers by order frequency',
+  'Create a coupon called SUMMER25 for 25% off',
+  'Set the Carmel Leather Sectional to hidden on the storefront',
 ];
 
 export default function WorkerChatPage() {
-  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+
+  const agent = useAgent({
+    host: WORKER_HOST,
+    agent: 'AskBC',
+    name: 'cdfqf9k6zf',
+  });
+
+  const chat = useAgentChat({
+    agent,
+  });
+
+  const { messages, sendMessage, status, addToolOutput, clearHistory } = chat;
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading]);
-
-  async function send(text: string) {
-    if (!text.trim() || loading) return;
-    setError(null);
-    setInput('');
-
-    const userMsg: Message = {
-      id: `u-${Date.now()}`,
-      role: 'user',
-      content: text,
-    };
-    setMessages((prev) => [...prev, userMsg]);
-    setLoading(true);
-
-    const started = Date.now();
-    try {
-      const res = await fetch('/api/worker-proxy', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ message: text }),
-      });
-      const data = (await res.json()) as WorkerResponse;
-
-      if (!res.ok || data.error) {
-        const msg = [data.error, data.detail, data.hint].filter(Boolean).join(' — ');
-        setError(msg || `Worker returned ${res.status}`);
-        setLoading(false);
-        return;
-      }
-
-      const assistantMsg: Message = {
-        id: `a-${Date.now()}`,
-        role: 'assistant',
-        content: data.text,
-        modelsUsed: data.modelsUsed,
-        durationMs: Date.now() - started,
-      };
-      setMessages((prev) => [...prev, assistantMsg]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Request failed');
-    } finally {
-      setLoading(false);
-    }
-  }
+  }, [messages, status]);
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    void send(input);
+    if (!input.trim() || status !== 'ready') return;
+    sendMessage({
+      role: 'user',
+      parts: [{ type: 'text', text: input }],
+    });
+    setInput('');
   }
+
+  function handleSuggestion(text: string) {
+    if (status !== 'ready') return;
+    sendMessage({
+      role: 'user',
+      parts: [{ type: 'text', text }],
+    });
+  }
+
+  function approveTool(toolCallId: string) {
+    addToolOutput({
+      toolCallId,
+      approved: true,
+    } as never);
+  }
+
+  function denyTool(toolCallId: string) {
+    addToolOutput({
+      toolCallId,
+      approved: false,
+    } as never);
+  }
+
+  const isLoading = status === 'submitted' || status === 'streaming';
+  const isConnected = agent.identified;
 
   return (
     <div
@@ -115,7 +99,6 @@ export default function WorkerChatPage() {
         color: '#313440',
       }}
     >
-      {/* Header */}
       <header
         style={{
           padding: '1rem 1.5rem',
@@ -130,14 +113,45 @@ export default function WorkerChatPage() {
           <h1 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>Ask BC</h1>
           <div style={{ fontSize: '0.75rem', color: '#737585', marginTop: 2 }}>
             Cloudflare Worker · Codemode · Generative UI
+            <span
+              style={{
+                display: 'inline-block',
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: isConnected ? '#0c8a5a' : '#c42a2a',
+                marginLeft: 8,
+                verticalAlign: 'middle',
+              }}
+              title={isConnected ? 'Connected' : 'Disconnected'}
+            />
           </div>
         </div>
-        <div style={{ fontSize: '0.75rem', color: '#737585' }}>
-          {messages.length > 0 && `${messages.length} messages`}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {messages.length > 0 && (
+            <>
+              <div style={{ fontSize: '0.75rem', color: '#737585' }}>
+                {messages.length} messages
+              </div>
+              <button
+                onClick={clearHistory}
+                style={{
+                  fontSize: '0.75rem',
+                  padding: '0.25rem 0.625rem',
+                  borderRadius: 6,
+                  border: '1px solid #d9dce9',
+                  background: 'white',
+                  color: '#525566',
+                  cursor: 'pointer',
+                }}
+              >
+                Clear
+              </button>
+            </>
+          )}
         </div>
       </header>
 
-      {/* Messages */}
       <div
         style={{
           flex: 1,
@@ -146,7 +160,7 @@ export default function WorkerChatPage() {
         }}
       >
         <div style={{ maxWidth: 720, margin: '0 auto' }}>
-          {messages.length === 0 && !loading && (
+          {messages.length === 0 && !isLoading && (
             <div style={{ textAlign: 'center', padding: '3rem 1rem' }}>
               <div
                 style={{
@@ -168,7 +182,8 @@ export default function WorkerChatPage() {
                 {SUGGESTIONS.map((s) => (
                   <button
                     key={s}
-                    onClick={() => void send(s)}
+                    onClick={() => handleSuggestion(s)}
+                    disabled={!isConnected}
                     style={{
                       background: 'white',
                       border: '1px solid #d9dce9',
@@ -176,10 +191,12 @@ export default function WorkerChatPage() {
                       padding: '0.5rem 1rem',
                       fontSize: '0.8125rem',
                       color: '#525566',
-                      cursor: 'pointer',
+                      cursor: isConnected ? 'pointer' : 'wait',
+                      opacity: isConnected ? 1 : 0.5,
                       transition: 'all 0.15s',
                     }}
                     onMouseEnter={(e) => {
+                      if (!isConnected) return;
                       e.currentTarget.style.borderColor = '#3C64F4';
                       e.currentTarget.style.color = '#3C64F4';
                     }}
@@ -195,53 +212,16 @@ export default function WorkerChatPage() {
             </div>
           )}
 
-          {messages.map((m) =>
-            m.role === 'user' ? (
-              <div
-                key={m.id}
-                style={{
-                  display: 'flex',
-                  justifyContent: 'flex-end',
-                  marginBottom: '1.25rem',
-                }}
-              >
-                <div
-                  style={{
-                    background: '#3C64F4',
-                    color: 'white',
-                    padding: '0.625rem 1rem',
-                    borderRadius: '1rem 1rem 0.25rem 1rem',
-                    maxWidth: '80%',
-                    fontSize: '0.875rem',
-                    lineHeight: 1.45,
-                  }}
-                >
-                  {m.content}
-                </div>
-              </div>
-            ) : (
-              <div key={m.id} style={{ marginBottom: '1.75rem' }}>
-                <BlockRenderer content={m.content} />
-                {(m.durationMs !== undefined || m.modelsUsed) && (
-                  <div
-                    style={{
-                      marginTop: '0.5rem',
-                      fontSize: '0.6875rem',
-                      color: '#8b8e9c',
-                      fontFamily:
-                        'SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                    }}
-                  >
-                    {m.modelsUsed?.join(' → ')}
-                    {m.durationMs !== undefined &&
-                      ` · ${(m.durationMs / 1000).toFixed(1)}s`}
-                  </div>
-                )}
-              </div>
-            ),
-          )}
+          {messages.map((m) => (
+            <MessageView
+              key={m.id}
+              message={m}
+              onApprove={approveTool}
+              onDeny={denyTool}
+            />
+          ))}
 
-          {loading && (
+          {isLoading && (
             <div style={{ display: 'flex', gap: '0.375rem', padding: '0.5rem 0' }}>
               {[0, 150, 300].map((delay) => (
                 <div
@@ -265,27 +245,10 @@ export default function WorkerChatPage() {
             </div>
           )}
 
-          {error && (
-            <div
-              style={{
-                background: '#fdf4f4',
-                border: '1px solid #fbeaea',
-                borderRadius: 8,
-                padding: '0.75rem 1rem',
-                fontSize: '0.8125rem',
-                color: '#8a3a3a',
-                marginBottom: '1rem',
-              }}
-            >
-              <strong>Error:</strong> {error}
-            </div>
-          )}
-
           <div ref={endRef} />
         </div>
       </div>
 
-      {/* Input */}
       <form
         onSubmit={handleSubmit}
         style={{
@@ -305,8 +268,8 @@ export default function WorkerChatPage() {
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask about your store..."
-            disabled={loading}
+            placeholder={isConnected ? 'Ask about your store...' : 'Connecting to agent...'}
+            disabled={!isConnected || isLoading}
             style={{
               flex: 1,
               padding: '0.625rem 1rem',
@@ -315,30 +278,144 @@ export default function WorkerChatPage() {
               fontSize: '0.875rem',
               outline: 'none',
               fontFamily: 'inherit',
-              background: loading ? '#fafbfc' : 'white',
+              background: isLoading ? '#fafbfc' : 'white',
             }}
             onFocus={(e) => (e.target.style.borderColor = '#3C64F4')}
             onBlur={(e) => (e.target.style.borderColor = '#d9dce9')}
           />
           <button
             type="submit"
-            disabled={loading || !input.trim()}
+            disabled={isLoading || !isConnected || !input.trim()}
             style={{
               padding: '0.625rem 1.25rem',
               borderRadius: 8,
               border: 'none',
-              background: loading || !input.trim() ? '#d9dce9' : '#3C64F4',
+              background: isLoading || !isConnected || !input.trim() ? '#d9dce9' : '#3C64F4',
               color: 'white',
               fontSize: '0.875rem',
               fontWeight: 500,
-              cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
+              cursor: isLoading || !isConnected || !input.trim() ? 'not-allowed' : 'pointer',
               fontFamily: 'inherit',
             }}
           >
-            {loading ? 'Thinking…' : 'Send'}
+            {isLoading ? 'Thinking…' : 'Send'}
           </button>
         </div>
       </form>
     </div>
   );
+}
+
+interface MessageViewProps {
+  message: UIMessage;
+  onApprove: (toolCallId: string) => void;
+  onDeny: (toolCallId: string) => void;
+}
+
+/**
+ * Walk a UIMessage's parts array. For each part:
+ *  - text → accumulate into a running markdown string, flush when a
+ *    non-text part breaks the run
+ *  - tool-* → if the tool is a known write tool in waiting-approval
+ *    state, render a WriteApproval card; otherwise skip (the sandbox
+ *    execute tool's internal state isn't merchant-facing)
+ *
+ * Text segments run through BlockRenderer so any fenced ```block``` JSON
+ * the model emitted becomes a real React component inline.
+ */
+function MessageView({ message, onApprove, onDeny }: MessageViewProps) {
+  if (message.role === 'user') {
+    const text = message.parts
+      .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+      .map((p) => p.text)
+      .join('');
+    return (
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          marginBottom: '1.25rem',
+        }}
+      >
+        <div
+          style={{
+            background: '#3C64F4',
+            color: 'white',
+            padding: '0.625rem 1rem',
+            borderRadius: '1rem 1rem 0.25rem 1rem',
+            maxWidth: '80%',
+            fontSize: '0.875rem',
+            lineHeight: 1.45,
+          }}
+        >
+          {text}
+        </div>
+      </div>
+    );
+  }
+
+  // Assistant message — walk parts, interleave text and tool cards
+  const rendered: React.ReactNode[] = [];
+  let textBuffer = '';
+  let key = 0;
+
+  const flushText = () => {
+    if (textBuffer.length === 0) return;
+    rendered.push(<BlockRenderer key={key++} content={textBuffer} />);
+    textBuffer = '';
+  };
+
+  for (const part of message.parts) {
+    if (part.type === 'text') {
+      textBuffer += part.text;
+      continue;
+    }
+
+    // Any tool part — check if it's a write tool in approval state
+    const partType = (part as { type: string }).type;
+    if (partType.startsWith('tool-')) {
+      const toolName = partType.slice('tool-'.length);
+      const writeToolNames = new Set([
+        'createCoupon',
+        'updateProductInventory',
+        'setProductVisibility',
+        'updateProductPrice',
+      ]);
+
+      if (writeToolNames.has(toolName)) {
+        flushText();
+        const state = getToolPartState(part);
+        const toolCallId = getToolCallId(part);
+        const input = getToolInput(part);
+        const mappedState =
+          state === 'waiting-approval'
+            ? 'waiting-approval'
+            : state === 'complete'
+              ? 'complete'
+              : state === 'approved'
+                ? 'waiting-approval' // still running after approval
+                : state === 'denied' || state === 'error'
+                  ? 'denied'
+                  : state === 'loading' || state === 'streaming'
+                    ? 'waiting-approval'
+                    : 'waiting-approval'; // unknown: safer to show pending than fake-complete
+        rendered.push(
+          <WriteApproval
+            key={key++}
+            toolCallId={toolCallId}
+            toolName={toolName}
+            input={input}
+            state={mappedState}
+            onApprove={onApprove}
+            onDeny={onDeny}
+          />,
+        );
+      }
+      // Non-write tool parts (execute, etc) — skip, not merchant-facing
+    }
+  }
+
+  flushText();
+
+  return <div style={{ marginBottom: '1.75rem' }}>{rendered}</div>;
 }

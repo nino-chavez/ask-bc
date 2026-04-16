@@ -1,42 +1,50 @@
 # Agent Runtime — Cloudflare Worker
 
-A Cloudflare Worker at `workers/agent-runtime/` that runs the Codemode-based agent for Ask BC. It is the execution substrate behind the chat experience — the Next.js UI on Vercel proxies chat messages to this Worker, which runs the agentic loop, generates TypeScript code, executes it in a sandbox, and streams structured responses back.
+The Cloudflare Worker at `workers/agent-runtime/` is the execution substrate for the Ask BC agent. The browser connects to it directly via WebSocket. It runs the agentic loop using Project Think as the base class, executes read tool scripts inside Codemode sandboxes (Dynamic Workers), and enforces a two-turn confirmation pattern for all write operations.
 
-Architectural rationale lives in [ADR-001](../architecture/decisions/001-codemode-agent-runtime.md). This document is operational: how to run, test, and extend the Worker without getting bitten by the non-obvious parts.
+Architecture rationale lives in [ADR-001](../architecture/decisions/001-codemode-agent-runtime.md). This document covers operational details: how to run, test, extend, and deploy the Worker.
 
-## Directory layout
+## Directory Layout
 
 ```
 workers/agent-runtime/
-├── package.json          # @cloudflare/think + codemode + AI SDK v6 + Anthropic
-├── wrangler.jsonc        # DO binding, worker_loaders, experimental compat flag
+├── package.json          # @cloudflare/think, @cloudflare/codemode, agents, @ai-sdk/anthropic, ai, zod, openapi-fetch, @upstash/redis
+├── wrangler.jsonc        # DO binding, worker_loaders, BC_API_BASE var, secret docs
 ├── tsconfig.json
 ├── .dev.vars             # Local secrets (gitignored)
-├── .gitignore
 └── src/
-    └── index.ts          # AskBC class + Worker fetch handler + smoke endpoint
+    ├── index.ts          # AskBC class, buildReadTools, buildWriteTools, system prompt, Worker fetch handler
+    ├── bc/
+    │   └── client.ts     # createBcClients() factory — typed openapi-fetch clients + V2 middleware
+    ├── blocks.ts         # BLOCK_SCHEMAS + renderBlockCatalog() — shared block protocol source of truth
+    ├── credentials.ts    # resolveStoreCredentials() — Redis + AES-256-GCM decrypt + env fallback
+    └── doc-search.ts     # searchBcDocs() — BC help docs keyword search
 ```
 
-## Required secrets
+## Required Secrets
 
-All three must be set — via `.dev.vars` for local dev or `wrangler secret put` for deployed environments.
+Set via `.dev.vars` for local dev or `wrangler secret put` for deployed environments.
 
 | Secret | Purpose |
-|---|---|
-| `ANTHROPIC_API_KEY` | Powers both Haiku 4.5 (default) and Sonnet 4.6 (continuation turns) via `@ai-sdk/anthropic` |
-| `BC_STORE_HASH` | The BigCommerce store hash, e.g. `cdfqf9k6zf`. Identifies the store for the Durable Object per-agent namespace. |
-| `BC_ACCESS_TOKEN` | Store-level API account access token from BC admin → Settings → API → Store-level API accounts. Needs `read-only` on Products, Orders, Customers, Marketing, Info & Settings, Channel settings, Channel listings, Store Inventory. |
+|--------|---------|
+| `ANTHROPIC_API_KEY` | Powers both Haiku 4.5 (default) and Sonnet 4.6 (continuation turns) |
+| `UPSTASH_REDIS_REST_URL` | Upstash Redis endpoint — same instance the Vercel app writes credentials to |
+| `UPSTASH_REDIS_REST_TOKEN` | Upstash auth token |
+| `CREDENTIAL_ENCRYPTION_KEY` | 32-byte hex key for AES-256-GCM — must be identical to the Vercel app's key |
+| `JWT_KEY` | JWT signing secret — must be identical to the Vercel app's JWT_KEY |
 
-For local dev, `.dev.vars` lives at `workers/agent-runtime/.dev.vars` in the format:
+For dev without Redis, `BC_STORE_HASH` and `BC_ACCESS_TOKEN` can substitute, but only for a single store.
+
+`.dev.vars` format:
 ```
 ANTHROPIC_API_KEY=sk-ant-...
-BC_STORE_HASH=cdfqf9k6zf
-BC_ACCESS_TOKEN=...
+UPSTASH_REDIS_REST_URL=https://...upstash.io
+UPSTASH_REDIS_REST_TOKEN=...
+CREDENTIAL_ENCRYPTION_KEY=<32-byte hex>
+JWT_KEY=<same as Next.js JWT_KEY>
 ```
 
-For deployed environments: `cd workers/agent-runtime && wrangler secret put ANTHROPIC_API_KEY` (and repeat for the others).
-
-## Running locally
+## Running Locally
 
 ```bash
 cd workers/agent-runtime
@@ -44,170 +52,210 @@ npm install
 npx wrangler dev
 ```
 
-The Worker boots on `http://localhost:8787` with all bindings wired (Durable Object, Worker Loader, secrets). First request cold-starts the DO; subsequent requests reuse it.
+The Worker boots on `http://localhost:8787`. First request to an agent route cold-starts the Durable Object; subsequent requests reuse it.
 
-**Verify the bindings load:**
+Verify the Worker loaded:
+
 ```bash
 curl http://localhost:8787/health
-# {"ok":true,"service":"ask-bc-agent-runtime","store":"cdfqf9k6zf"}
+# {"ok":true,"service":"ask-bc-agent-runtime"}
 ```
 
-**Run a smoke test against the Codemode loop:**
+Run a smoke test (bypasses WebSocket, tests full Codemode loop against real BC data):
+
 ```bash
 curl -X POST http://localhost:8787/smoke \
   -H "content-type: application/json" \
   -d '{"message":"How many products are in my store?"}'
 ```
 
-Returns a JSON document with:
-- `text` — final assistant response
-- `toolCalls` — every tool event in the turn (step-start, tool-execute with generated code, outputs, errors)
-- `modelsUsed` — which model(s) handled the turn (typically `["haiku-4-5"]`, `["haiku-4-5","sonnet-4-6"]` for continuations)
-- `timedOut` — true if the turn exceeded the 60s smoke budget
+Returns:
+```json
+{
+  "text": "You have 119 products...",
+  "toolCalls": [...],
+  "modelsUsed": ["haiku-4-5"],
+  "timedOut": false
+}
+```
 
-The smoke endpoint bypasses the WebSocket chat protocol and calls `saveMessages()` + `onChatResponse` directly. It is **only for testing** — real chat traffic from the Next.js UI uses `routeAgentRequest` with WebSockets (Phase 2).
+The smoke endpoint is blocked in production. It returns 403 when `APP_ORIGIN` does not contain `localhost`.
 
-## Two-model strategy
+## Two-Model Strategy
 
-`getModel()` returns Haiku 4.5 (`claude-haiku-4-5-20251001`). `beforeTurn(ctx)` upgrades to Sonnet 4.6 (`claude-sonnet-4-6`) when `ctx.continuation === true`.
+`getModel()` returns Haiku 4.5 (`claude-haiku-4-5-20251001`) for all first-response turns.
 
-**`continuation: true` fires for:**
-- Auto-continuation after a client tool result (the write-approval flow in Phase 3)
-- Chat recovery after a Durable Object restart
+`beforeTurn({ continuation: true })` upgrades to Sonnet 4.6 (`claude-sonnet-4-6`).
 
-**`continuation: true` does NOT fire for:**
-- In-turn multi-step tool calls (same `streamText` invocation, same `beforeTurn` context)
-- Fresh user messages (each message is a new turn, so `continuation: false`)
+**`continuation: true` fires when:**
+- A tool error occurred and the turn retries (error recovery)
+- The user confirms a write and the execution turn begins
+- The Durable Object restarted and the session recovers
 
-This means Haiku handles 100% of normal first-response turns including retries within the same turn when a tool errors. Empirically Haiku recovers from tool errors fine — the earlier smoke tests showed it pivoting strategies on its own. Sonnet only takes over at the high-stakes moments where deeper reasoning earns its 3× cost: post-approval write execution and chat recovery.
+**`continuation: true` does NOT fire when:**
+- Normal first-response turns (fresh user message)
+- In-turn multi-step tool calls within the same `streamText` invocation
 
-## Adding a new BC tool
+In practice Haiku handles ~95% of turns. Sonnet activates on retries and write executions where deeper reasoning matters.
 
-Tools live in `buildBcTools(env)` in `src/index.ts`. Each is an AI SDK `tool()` with a Zod input schema and an `execute()` that calls `bcGet` (or the V2 variant) with real credentials from `env`. The sandbox sees them as `codemode.*` RPC calls — credentials never touch the generated code.
+## Tool Architecture
 
-```ts
+### Read Tools (15)
+
+Defined in `buildReadTools(env, bc)`. Registered inside `createExecuteTool()` so they become `codemode.*` functions in the TypeScript sandbox. Credentials never appear in generated scripts.
+
+| Tool | BC API | Primary Use |
+|------|--------|-------------|
+| `getProducts` | V3 `/catalog/products` | List/filter products with pagination |
+| `getProduct` | V3 `/catalog/products/{id}` | Single product with variants, images, custom fields |
+| `getProductVariants` | V3 `/catalog/products/{id}/variants` | SKU-level inventory and pricing |
+| `getCategories` | V3 `/catalog/categories` | Category tree navigation |
+| `getBrands` | V3 `/catalog/brands` | Manufacturer list |
+| `getOrders` | V2 `/orders` | List orders with status/customer/date filters |
+| `getOrder` | V2 `/orders/{id}` | Single order detail |
+| `getOrderProducts` | V2 `/orders/{id}/products` | Line items — use for product×order joins |
+| `getOrderCount` | V2 `/orders/count` | Count orders without fetching — use for "how many" questions |
+| `getOrderShippingAddresses` | V2 `/orders/{id}/shipping_addresses` | Multi-address shipping info |
+| `getCustomers` | V3 `/customers` | List/filter customers by email, company, date |
+| `getInventoryLocations` | V3 `/inventory/locations` | Warehouses and inventory sites |
+| `getPromotions` | V3 `/promotions` | Automatic discounts (BOGO, % off) |
+| `getCoupons` | V2 `/coupons` | Manual discount codes |
+| `getChannels` | V3 `/channels` | Multi-storefront/marketplace topology |
+| `searchDocumentation` | Internal | BC help docs keyword search |
+
+### Write Tools (5)
+
+Defined in `buildWriteTools(env, bc, auditLog)`. Registered as top-level tools **outside** the Codemode sandbox — the model calls them directly as tool calls, not from inside a generated script. Write tools are structurally unavailable inside Codemode.
+
+Each write tool has a `confirmed: boolean` parameter. The two-turn pattern is enforced at the prompt level:
+
+1. First call with `confirmed: false` — returns a `{status: "preview", ...}` object, no mutation
+2. Model shows the preview to the merchant and asks for confirmation
+3. After merchant confirms, model calls again with `confirmed: true` — executes and logs to audit
+
+| Tool | BC API | What It Does |
+|------|--------|-------------|
+| `createCoupon` | V2 `POST /coupons` | Create a coupon code with discount rules |
+| `updateProductInventory` | V3 `PUT /catalog/products/{id}` | Set inventory_level on a product |
+| `setProductVisibility` | V3 `PUT /catalog/products/{id}` | Publish or unpublish a product |
+| `updateProductPrice` | V3 `PUT /catalog/products/{id}` | Update price and/or sale_price |
+| `deleteCoupon` | V2 `DELETE /coupons/{id}` | Delete a coupon by ID |
+
+All confirmed writes are logged to the Durable Object's SQLite `write_audit` table via `logWrite()`.
+
+## Adding a New Read Tool
+
+```typescript
+// In buildReadTools(env, bc):
 getCustomerGroups: tool({
   description: "Fetch customer groups. Returns group id, name, is_default, discount_rules.",
   inputSchema: z.object({
     limit: z.number().int().min(1).max(250).default(50),
     page: z.number().int().min(1).default(1),
   }),
-  execute: async ({ limit, page }) => {
-    const params = new URLSearchParams({ limit: String(limit), page: String(page) });
-    return bcGet(env, `/customer_groups?${params}`);
-  },
+  execute: async ({ limit, page }) =>
+    unwrap(
+      await bc.customers.GET("/customers/groups", {
+        params: { query: { limit, page }, header: { Accept: "application/json" } },
+      }),
+      "GET /customers/groups",
+    ),
 }),
 ```
 
-**Keep descriptions specific.** The sandbox's TypeScript declaration for `codemode.*` is derived from these descriptions. The model uses them to decide what to call and how — vague descriptions produce vague code.
+Write specific descriptions — the model reads them to decide what to call and how. Vague descriptions cause wrong tool selection. Keep `inputSchema` strict: use `.int()`, `.min()`, `.max()`, and `.default()` to prevent the model from passing out-of-range values.
 
-## Known gotchas
+## Security Hardening Summary
 
-These are the non-obvious things that cost time during Phase 0. Document them here, not in the code, because the fixes are idiomatic to the Cloudflare stack, not to Ask BC.
+| ID | Control | Implementation |
+|----|---------|---------------|
+| S-1 | JWT auth on agent routes | `jwtVerify()` on WebSocket upgrade; storeHash claim validated against DO room name |
+| S-2 | CORS locked to APP_ORIGIN | `corsHeaders()` returns exact origin, not `*`; applied to all responses |
+| S-3 | Two-turn write confirmation | Write tools structurally absent from Codemode; `confirmed` boolean enforced at prompt + tool level |
+| S-4 | Per-store credentials from Redis | `resolveStoreCredentials()` looks up `ask-bc:store:{hash}` at turn start; no hardcoded tokens |
+| S-5 | Smoke endpoint blocked in production | 403 when `APP_ORIGIN` is not localhost |
+| S-7 | AES-256-GCM token encryption at rest | Vercel encrypts on write; Worker decrypts on read; 256-bit key in `CREDENTIAL_ENCRYPTION_KEY` |
+
+## Known Gotchas
 
 ### 1. AI SDK v6 + Zod v4 peer dependencies
 
-`@cloudflare/think` declares `"ai": "^6.0.0"` and `"zod": "^4.0.0"` as peer dependencies. If you install `ai@4` or `zod@3` out of habit, the compile succeeds but type inference breaks in non-obvious places. Always pin to AI SDK v6 + Zod v4 in this worker.
+`@cloudflare/think` requires `ai@^6` and `zod@^4`. Installing `ai@4` or `zod@3` compiles but breaks type inference. Always pin to AI SDK v6 + Zod v4 in the Worker.
 
 ### 2. Native DO RPC bypasses `onStart()`
 
-When you call a method on a Durable Object stub via native RPC (`env.ASK_BC.get(id).someMethod()`), partyserver's lazy initialization — which normally fires on `fetch` / `alarm` / `webSocket` entry — does **not** run. That means `this.session`, `this.workspace`, and anything else Think's `onStart` sets up will be undefined.
+When calling a Durable Object method via native RPC (not through `routeAgentRequest`), partyserver's lazy initialization does not run. `this.session`, `this.workspace`, and anything set in `onStart` will be undefined.
 
-The escape hatch is `this.__unsafe_ensureInitialized()`, documented in partyserver specifically for "frameworks that receive calls via native DO RPC, bypassing the standard entry points." Call it at the top of any custom RPC method before touching `this.session` or `this.workspace`.
+Call `this.__unsafe_ensureInitialized()` at the top of any RPC method before touching session or workspace state. The smoke endpoint's `smokeAsk()` method does this.
 
-This is why the smoke endpoint's `smokeAsk()` method starts with:
-```ts
-await (this as unknown as { __unsafe_ensureInitialized(): Promise<void> })
-  .__unsafe_ensureInitialized();
-```
+Real chat traffic via `routeAgentRequest` uses the standard entry path and does not need this.
 
-Real chat traffic via `routeAgentRequest` goes through the standard entry path, so this hack is not needed there.
+### 3. `.name` requires explicit set on RPC stubs
 
-### 3. `.name` must be set explicitly when bypassing `routePartyKitRequest`
+`partyserver`'s `.name` property is only auto-set when the request routes through `routePartyKitRequest` or the WebSocket protocol. Direct RPC stubs leave `.name` undefined, which causes session initialization to throw.
 
-Related to #2 but distinct: partyserver's `.name` property (used for per-agent identity) is only auto-set when the request routes through `routePartyKitRequest` or the WebSocket protocol. Direct RPC calls leave `.name` undefined, and any code path that reads it (Session initialization, workspace naming) throws:
+Fix: call `stub.setName(storeHash)` on the DO stub before any other method. The smoke endpoint does this.
 
-```
-Error: Attempting to read .name on AskBC before it was set.
-```
+### 4. BC V2 empty body for no-results (handled)
 
-Fix: call `stub.setName(storeHash)` on the DO stub before any other method. Track at [workerd#2240](https://github.com/cloudflare/workerd/issues/2240).
+BigCommerce V2 endpoints return HTTP 200 with an empty body when a query matches no rows, instead of `{data: []}`. `response.json()` throws on empty body.
 
-### 4. BC V2 endpoints return an empty body for "no matching rows" (FIXED)
+`src/bc/client.ts` installs `v2EmptyBodyMiddleware` on V2 clients that patches empty bodies to `[]`. This is transparent to tool code. The patched response carries `x-bc-empty-body-patched: 1` for debugging.
 
-BigCommerce's V2 endpoints return HTTP 200 with a completely empty response body when a query matches no rows — instead of `{"data":[]}` like V3. Default `response.json()` throws `Unexpected end of JSON input`.
+### 5. `beforeTurn` type requires explicit annotation
 
-**Fix:** `src/bc/client.ts` installs an `openapi-fetch` middleware on V2 clients (`orders`, `marketing`) that clones the response, checks if the body is empty, and substitutes `"[]"` when it is. The substituted response carries an `x-bc-empty-body-patched: 1` header for debugging. V3 endpoints don't need this — they return `{data: []}` natively.
+TypeScript cannot infer `model: LanguageModel` from `anthropic("model-id")` due to overload signatures. Annotate explicitly:
 
-```ts
-const v2EmptyBodyMiddleware: Middleware = {
-  async onResponse({ response }) {
-    if (!response.ok) return;
-    const cloned = response.clone();
-    const text = await cloned.text();
-    if (text.length > 0) return;
-    return new Response("[]", { status: response.status, headers: { "content-type": "application/json", "x-bc-empty-body-patched": "1" } });
-  },
-};
-```
-
-Phase 0 surfaced this during the "top-selling products this month" test (2 errors recovered mid-turn). Phase 1 fix verified during the "5 most recent completed orders" test — zero errors, single execute.
-
-### 5. `beforeTurn` type inference requires explicit `LanguageModel` type
-
-TypeScript cannot infer `model: LanguageModel` from `anthropic("model-id")` cleanly due to the overload signatures on `@ai-sdk/anthropic`. Annotate the return type of `beforeTurn` explicitly:
-
-```ts
+```typescript
 import { type LanguageModel } from "ai";
 
-beforeTurn(ctx: { continuation: boolean }): { model: LanguageModel } | void {
+async beforeTurn(ctx: { continuation: boolean; body?: Record<string, unknown>; system: string }): Promise<{ model: LanguageModel; system?: string } | void> {
   // ...
 }
 ```
 
-Not doing this produces a wall of "AnthropicProvider is not assignable to LanguageModel" errors that are actually a type-narrowing issue, not a real incompatibility.
-
-## Phase plan
+## Phase History
 
 | Phase | Status | Description |
-|---|---|---|
-| **0 — De-risk Project Think** | ✅ Complete | Worker + Think + Codemode + Dynamic Workers proven end-to-end on real BC data |
-| **1 — Typed BC SDK + full tool surface** | ✅ Complete | 11 OpenAPI specs → openapi-typescript → openapi-fetch clients. 15 typed tools covering products, product variants, categories, brands, orders (V2), order line items, order shipping, customers, inventory locations, promotions (V3), coupons (V2), channels. V2 empty-body middleware patches no-results responses. Enriched system prompt with V2 vs V3 shape rules, status_id table, and canonical example scripts. Verified end-to-end: 3-way customer × orders × line-items join in 8.3s, single execute, zero errors. |
-| **2 — Generative UI** | Pending | Component registry (KPICard, SparklineChart, DataTable, ProductCard, OrderTimeline), structured block streaming, Next.js inline renderer |
-| **3 — Writes with approval gate** | Pending | Re-scope BC API account to modify, AST walk to classify read vs write, approval card in chat, audit log in Durable Object |
-| **4 — Demo reel recapture** | Pending | Re-record the 12-scene reel against the new stack |
-
-## Phase 1 — Tool surface reference
-
-All tools are defined in `src/index.ts` inside `buildBcTools(env)` and resolve into `codemode.*` functions for the sandbox. Tools are typed against OpenAPI-generated path types in `src/bc/*.d.ts`, with inputs validated by Zod. The host holds credentials; generated code never sees them.
-
-| Tool | API | Primary use |
-|---|---|---|
-| `getProducts` | V3 `/catalog/products` | List + filter products (name/sku/category/visibility/sort) |
-| `getProduct` | V3 `/catalog/products/{id}` | Single product with optional includes (variants, images, custom_fields) |
-| `getProductVariants` | V3 `/catalog/products/{id}/variants` | SKU-level inventory and pricing |
-| `getCategories` | V3 `/catalog/categories` | Category tree navigation |
-| `getBrands` | V3 `/catalog/brands` | Manufacturer list |
-| `getOrders` | V2 `/orders` | List orders with status/customer/date filters |
-| `getOrder` | V2 `/orders/{id}` | Single order detail |
-| `getOrderProducts` | V2 `/orders/{id}/products` | Line items — **use this for product×order joins** |
-| `getOrderShippingAddresses` | V2 `/orders/{id}/shipping_addresses` | Multi-address order shipping |
-| `getCustomers` | V3 `/customers` | List customers, filter by email/company/date |
-| `getInventoryLocations` | V3 `/inventory/locations` | Warehouses, retail stores, inventory sites |
-| `getPromotions` | V3 `/promotions` | Automatic discounts (BOGO, % off, rules) |
-| `getCoupons` | V2 `/coupons` | Manual discount codes |
-| `getChannels` | V3 `/channels` | Multi-storefront / marketplace topology |
-
-Pending for later phases: write operations (Phase 3), doc search (port from Vercel side), tax settings, shipping zones, price lists, abandoned carts.
+|-------|--------|-------------|
+| 0 — De-risk Project Think | Complete | Worker + Think + Codemode + Dynamic Workers proven end-to-end on real BC data |
+| 1 — Typed BC SDK + full tool surface | Complete | 11 OpenAPI specs → openapi-typescript → openapi-fetch clients. 15 read tools. V2 empty-body middleware. Enriched system prompt with API shape rules, status_id table, counting patterns, pagination patterns. Verified: 3-way customer × orders × line-items join in 8.3s. |
+| 2 — Generative UI | Complete | 7 React block components, block protocol (fenced `block` JSON), Next.js inline renderer, WorkerChatPanel connecting directly to Worker via WebSocket |
+| 3 — Writes with approval gate | Complete | 5 write tools, two-turn confirmation pattern, audit log in DO SQLite, AES-256-GCM credential encryption, JWT auth gate on WebSocket upgrade, CORS hardening |
+| 4 — Demo reel recapture | Pending | Re-record the 12-scene reel against the new stack |
 
 ## Deployment
 
-Deferred until Phase 2 at the earliest. Currently the Worker runs only in `wrangler dev`. When we deploy:
+**Production URLs:**
+- Worker: `https://ask-bc-agent-runtime.biq.workers.dev`
+- Vercel: `https://ask-bc-signal-x-studio-labs.vercel.app`
 
-1. `wrangler deploy` from `workers/agent-runtime/`
-2. Set secrets via `wrangler secret put`
-3. Note the `*.workers.dev` URL — wire it into the Next.js `/api/chat` proxy as `ASK_BC_WORKER_URL`
-4. Update Vercel project env vars on the Next.js side
-5. Add a `/health` check to CI or an uptime monitor
+**Deploy the Worker:**
 
-The BC store hash is per-deployment (one Worker per merchant currently), so production will need per-store configuration. How we scope this — one Worker with a DO namespace per store, or one Worker instance per store — is a Phase 3 decision tied to the write approval flow and audit log.
+```bash
+cd workers/agent-runtime
+npx wrangler deploy
+```
+
+**Set production secrets (one-time or on rotation):**
+
+```bash
+wrangler secret put ANTHROPIC_API_KEY
+wrangler secret put UPSTASH_REDIS_REST_URL
+wrangler secret put UPSTASH_REDIS_REST_TOKEN
+wrangler secret put CREDENTIAL_ENCRYPTION_KEY
+wrangler secret put JWT_KEY
+```
+
+**After deploying**, verify:
+
+```bash
+curl https://ask-bc-agent-runtime.biq.workers.dev/health
+# {"ok":true,"service":"ask-bc-agent-runtime"}
+```
+
+The smoke endpoint returns 403 in production (correct behavior). Use the full chat UI to test production.
+
+**Wiring the Vercel app to the Worker:** Set `NEXT_PUBLIC_WORKER_HOST=https://ask-bc-agent-runtime.biq.workers.dev` in Vercel project settings. The `WorkerChatPanel` reads this to construct the WebSocket URL.
+
+See [docs/ops/deployment.md](../ops/deployment.md) for the full deployment checklist.

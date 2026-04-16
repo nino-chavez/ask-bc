@@ -32,7 +32,8 @@
     }
   ],
   "vars": {
-    "BC_API_BASE": "https://api.bigcommerce.com"
+    "BC_API_BASE": "https://api.bigcommerce.com",
+    "APP_ORIGIN": "http://localhost:3000"
   }
   // Secrets set via wrangler secret put:
   //   ANTHROPIC_API_KEY

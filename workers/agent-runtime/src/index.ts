@@ -6,6 +6,8 @@ import { tool, type LanguageModel } from "ai";
 import { z } from "zod";
 import { createBcClients } from "./bc/client.js";
 import { renderBlockCatalog } from "./blocks.js";
+import { searchBcDocs } from "./doc-search.js";
+import { Session } from "agents/experimental/memory/session";
 
 interface Env {
   AskBC: DurableObjectNamespace;
@@ -14,6 +16,7 @@ interface Env {
   BC_STORE_HASH: string;
   BC_ACCESS_TOKEN: string;
   BC_API_BASE: string;
+  APP_ORIGIN: string;
 }
 
 // ─── BC tool surface ───────────────────────────────────────────────
@@ -37,8 +40,7 @@ function unwrap<T>(r: { data?: T; error?: unknown }, ctx: string): T {
   return r.data;
 }
 
-function buildReadTools(env: Env) {
-  const bc = createBcClients(env);
+function buildReadTools(env: Env, bc: ReturnType<typeof createBcClients>) {
   const u = unwrap;
 
   return {
@@ -356,26 +358,28 @@ function buildReadTools(env: Env) {
           "GET /channels",
         ),
     }),
+
+    // ─── Documentation search ───────────────────────────────────────
+    searchDocumentation: tool({
+      description:
+        "Search BigCommerce help docs for how-to questions. Returns matching articles with titles, URLs, and relevance scores. Use when the merchant asks 'how do I...' or needs setup/configuration guidance rather than store data.",
+      inputSchema: z.object({
+        query: z.string().describe("The merchant's question or keywords to search for"),
+      }),
+      execute: async ({ query }) => searchBcDocs(query),
+    }),
   };
 }
 
-// ─── Write tools — TOP-LEVEL with needsApproval: true ─────────────
+// ─── Write tools — TOP-LEVEL, execute on call ─────────────────────
 //
-// These are NOT exposed inside the codemode sandbox. The model calls
-// them as direct top-level tools. Each one has `needsApproval: true`,
-// so the AI SDK's chat protocol pauses after the model emits the call
-// with its input arguments, waits for the client to send
-// CF_AGENT_TOOL_APPROVAL with `accepted: true`, and only then runs the
-// execute() function.
-//
-// When the approval resumes execution, Think's `beforeTurn` fires with
-// `continuation: true`, which upgrades the model to Sonnet 4.6 for the
-// post-approval reasoning. Haiku handles the "what would this write
-// look like" phase; Sonnet handles the "what does the result mean"
-// phase. Two-model strategy working as designed.
+// NOT inside the codemode sandbox. The model calls them directly.
+// Gated by system prompt rules (only write when merchant explicitly
+// asks). Pre-execution approval via needsApproval is not yet functional
+// in the AI SDK + Think stack — see ADR-001 and security audit.
+// TODO: implement two-turn write pattern (S-3) for production.
 
-function buildWriteTools(env: Env) {
-  const bc = createBcClients(env);
+function buildWriteTools(env: Env, bc: ReturnType<typeof createBcClients>) {
   const u = unwrap;
 
   return {
@@ -631,8 +635,18 @@ Be concise. Merchants want answers, not explanations of your process. Prefer blo
 // ─── The Agent ─────────────────────────────────────────────────────
 
 export class AskBC extends Think<Env> {
-  // Phase 0 smoke state: captures the last turn's final result so the /smoke
-  // HTTP endpoint can return it synchronously. Real chat uses WebSocket streaming.
+  // Cached BC API clients — created once on first getTools() call, reused
+  // across turns. Avoids creating 11 openapi-fetch instances per turn. [P-5]
+  private _bcClients: ReturnType<typeof createBcClients> | null = null;
+
+  private getBcClients() {
+    if (!this._bcClients) {
+      this._bcClients = createBcClients(this.env);
+    }
+    return this._bcClients;
+  }
+
+  // Smoke test state
   _lastSmokeResult: { text: string; toolCalls: unknown[] } | null = null;
   _lastSmokeResolver: (() => void) | null = null;
   _lastModelUsed: string[] = [];
@@ -666,24 +680,29 @@ export class AskBC extends Think<Env> {
     return SYSTEM_PROMPT;
   }
 
+  // Enable Anthropic prompt caching — the system prompt (~3KB with block
+  // catalog + API shape rules) is cached across turns within the same
+  // session, reducing input token costs on follow-up messages. [P-3]
+  configureSession(session: Session) {
+    return session.withCachedPrompt();
+  }
+
   getTools() {
+    const bc = this.getBcClients();
+
     // Reads go inside codemode — the model can chain them in a single
     // script with Promise.all, pagination, joins, aggregation.
-    const readTools = buildReadTools(this.env);
+    const readTools = buildReadTools(this.env, bc);
 
-    // Writes are TOP-LEVEL tools with needsApproval: true. The sandbox
-    // doesn't see them, so the model literally cannot write from inside
-    // codemode — every mutation routes through the explicit approval
-    // gate the AI SDK surfaces to the client.
-    const writeTools = buildWriteTools(this.env);
+    // Writes are top-level tools outside the sandbox. The model calls
+    // them directly; the sandbox can't access them.
+    const writeTools = buildWriteTools(this.env, bc);
 
     return {
       execute: createExecuteTool({
         tools: readTools,
         loader: this.env.LOADER,
         timeout: 30_000,
-        // globalOutbound defaults to null — sandbox is fully isolated,
-        // only codemode.* RPC calls escape to the host.
       }),
       ...writeTools,
     };
@@ -771,21 +790,22 @@ export class AskBC extends Think<Env> {
 // ─── Worker entry ──────────────────────────────────────────────────
 
 // ─── CORS ──────────────────────────────────────────────────────────
-// The Next.js dev server runs on http://localhost:3000 and connects
-// to this Worker at http://localhost:8787. Without CORS, the browser
-// blocks the cross-origin request. For production we'll narrow this
-// to the actual Vercel origin.
+// Restricted to APP_ORIGIN — no wildcard. The browser connection to
+// the Worker is cross-origin (Vercel → Cloudflare), so CORS is
+// required, but only the exact app origin is allowed.
 
-const CORS_HEADERS: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Partykit-Namespace, X-Partykit-Room",
-  "Access-Control-Max-Age": "86400",
-};
+function corsHeaders(env: Env): Record<string, string> {
+  return {
+    "Access-Control-Allow-Origin": env.APP_ORIGIN || "http://localhost:3000",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Partykit-Namespace, X-Partykit-Room",
+    "Access-Control-Max-Age": "86400",
+  };
+}
 
-function withCors(response: Response): Response {
+function withCors(response: Response, env: Env): Response {
   const headers = new Headers(response.headers);
-  for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v);
+  for (const [k, v] of Object.entries(corsHeaders(env))) headers.set(k, v);
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -797,28 +817,34 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
-    // CORS preflight
+    // CORS preflight — restricted to APP_ORIGIN [S-2]
     if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: CORS_HEADERS });
+      return new Response(null, { status: 204, headers: corsHeaders(env) });
     }
 
-    // Health check
+    // Health check — no store hash leak [M-1]
     if (url.pathname === "/health") {
       return withCors(
         new Response(
-          JSON.stringify({
-            ok: true,
-            service: "ask-bc-agent-runtime",
-            store: env.BC_STORE_HASH || "(not set)",
-          }),
+          JSON.stringify({ ok: true, service: "ask-bc-agent-runtime" }),
           { headers: { "content-type": "application/json" } },
         ),
+        env,
       );
     }
 
-    // Phase 0 smoke test: POST /smoke {message} → one chat turn, returns
-    // final text + event trace. Synchronous, curl-friendly.
+    // Smoke test — dev-only, gated [S-5]
     if (url.pathname === "/smoke" && request.method === "POST") {
+      if (env.APP_ORIGIN && !env.APP_ORIGIN.includes("localhost")) {
+        return withCors(
+          new Response(JSON.stringify({ error: "smoke endpoint disabled in production" }), {
+            status: 403,
+            headers: { "content-type": "application/json" },
+          }),
+          env,
+        );
+      }
+
       const body = (await request.json()) as { message?: string };
       if (!body.message) {
         return new Response(JSON.stringify({ error: "message required" }), {
@@ -831,8 +857,6 @@ export default {
       const stub = env.AskBC.get(id) as unknown as AskBC & {
         setName(name: string): Promise<void>;
       };
-      // Known DO/partyserver quirk: .name must be set explicitly when
-      // bypassing routePartyKitRequest (cloudflare/workerd#2240).
       await stub.setName(env.BC_STORE_HASH);
       const result = await stub.smokeAsk(body.message);
 
@@ -840,19 +864,18 @@ export default {
         new Response(JSON.stringify(result, null, 2), {
           headers: { "content-type": "application/json" },
         }),
+        env,
       );
     }
 
     // Delegate real chat routes to the agents framework (handles WebSocket
     // upgrade + /agents/:namespace/:room protocol automatically).
-    // WebSocket upgrade responses (status 101) can't be cloned with
-    // new Response(), so only wrap non-upgrade responses in CORS.
     const response = await routeAgentRequest(request, env);
     if (response) {
-      if (response.status === 101) return response; // WebSocket upgrade
-      return withCors(response);
+      if (response.status === 101) return response;
+      return withCors(response, env);
     }
 
-    return withCors(new Response("Not found", { status: 404 }));
+    return withCors(new Response("Not found", { status: 404 }), env);
   },
 };

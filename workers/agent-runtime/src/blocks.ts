@@ -144,6 +144,23 @@ export const BLOCK_SCHEMAS: Record<string, BlockSchema> = {
   }
 }`,
   },
+
+  ErrorCard: {
+    description:
+      "An error card showing a BC API failure, auth issue, or tool error with optional remediation guidance.",
+    whenToUse:
+      "When a BC API call returns a non-2xx response (403, 429, 500), when a tool fails with an error, when the merchant needs to take an action (re-authorize, check settings).",
+    example: `{
+  "type": "ErrorCard",
+  "props": {
+    "title": "API rate limit exceeded",
+    "message": "BigCommerce returned HTTP 429 — too many requests.",
+    "status_code": 429,
+    "endpoint": "GET /v3/catalog/products",
+    "suggestion": "Wait a minute and try again, or reduce the page size of your queries."
+  }
+}`,
+  },
 };
 
 /**

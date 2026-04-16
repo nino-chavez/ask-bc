@@ -8,6 +8,7 @@ import ProductCard from './ProductCard';
 import OrderTimeline from './OrderTimeline';
 import InventoryBar from './InventoryBar';
 import SparklineChart from './SparklineChart';
+import ErrorCard from './ErrorCard';
 import type { Block, BlockType } from './types';
 
 export { default as KPICard } from './KPICard';
@@ -29,6 +30,7 @@ const REGISTRY: Record<BlockType, (props: never) => ReactNode> = {
   OrderTimeline: OrderTimeline as (props: never) => ReactNode,
   InventoryBar: InventoryBar as (props: never) => ReactNode,
   SparklineChart: SparklineChart as (props: never) => ReactNode,
+  ErrorCard: ErrorCard as (props: never) => ReactNode,
 };
 
 interface ParsedSegment {
@@ -48,14 +50,28 @@ interface ParsedSegment {
  * `error` segments — they render inline as a subtle warning so the model
  * output is still readable.
  */
-export function parseSegments(content: string): ParsedSegment[] {
+export function parseSegments(content: string, streaming = false): ParsedSegment[] {
   const segments: ParsedSegment[] = [];
-  // Fenced code block: ``` `block` [optional whitespace] newline ... newline ```
+
+  // During streaming, suppress incomplete fences that haven't closed yet.
+  // This prevents the raw JSON from flashing as text mid-stream. [P-2]
+  let safeContent = content;
+  if (streaming) {
+    const lastOpen = content.lastIndexOf('```block');
+    if (lastOpen !== -1) {
+      const afterOpen = content.slice(lastOpen);
+      const closeIdx = afterOpen.indexOf('\n```', afterOpen.indexOf('\n') + 1);
+      if (closeIdx === -1) {
+        safeContent = content.slice(0, lastOpen);
+      }
+    }
+  }
+
   const fenceRegex = /```block\s*\n([\s\S]*?)\n```/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
-  while ((match = fenceRegex.exec(content)) !== null) {
+  while ((match = fenceRegex.exec(safeContent)) !== null) {
     // Markdown text before the fence
     if (match.index > lastIndex) {
       const text = content.slice(lastIndex, match.index);
@@ -89,16 +105,16 @@ export function parseSegments(content: string): ParsedSegment[] {
   }
 
   // Tail markdown after the last fence
-  if (lastIndex < content.length) {
-    const text = content.slice(lastIndex);
+  if (lastIndex < safeContent.length) {
+    const text = safeContent.slice(lastIndex);
     if (text.trim().length > 0) {
       segments.push({ kind: 'markdown', text });
     }
   }
 
   // If the content had no fences at all, return a single markdown segment
-  if (segments.length === 0 && content.trim().length > 0) {
-    segments.push({ kind: 'markdown', text: content });
+  if (segments.length === 0 && safeContent.trim().length > 0) {
+    segments.push({ kind: 'markdown', text: safeContent });
   }
 
   return segments;
@@ -106,16 +122,18 @@ export function parseSegments(content: string): ParsedSegment[] {
 
 interface BlockRendererProps {
   content: string;
+  streaming?: boolean;
 }
 
 /**
  * Renders an agent response that may contain interleaved markdown and
  * ```block``` fenced JSON components. Markdown segments pass through the
  * existing ChatMarkdown renderer; block segments mount real React
- * components from the registry.
+ * components from the registry. During streaming, incomplete fences are
+ * suppressed to prevent raw JSON flashing. [P-2]
  */
-export function BlockRenderer({ content }: BlockRendererProps) {
-  const segments = parseSegments(content);
+export function BlockRenderer({ content, streaming = false }: BlockRendererProps) {
+  const segments = parseSegments(content, streaming);
 
   return (
     <>

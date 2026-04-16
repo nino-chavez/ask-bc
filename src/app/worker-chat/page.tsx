@@ -212,10 +212,11 @@ export default function WorkerChatPage() {
             </div>
           )}
 
-          {messages.map((m) => (
+          {messages.map((m, i) => (
             <MessageView
               key={m.id}
               message={m}
+              streaming={isLoading && i === messages.length - 1}
               onApprove={approveTool}
               onDeny={denyTool}
             />
@@ -308,6 +309,7 @@ export default function WorkerChatPage() {
 
 interface MessageViewProps {
   message: UIMessage;
+  streaming?: boolean;
   onApprove: (toolCallId: string) => void;
   onDeny: (toolCallId: string) => void;
 }
@@ -323,7 +325,7 @@ interface MessageViewProps {
  * Text segments run through BlockRenderer so any fenced ```block``` JSON
  * the model emitted becomes a real React component inline.
  */
-function MessageView({ message, onApprove, onDeny }: MessageViewProps) {
+function MessageView({ message, streaming, onApprove, onDeny }: MessageViewProps) {
   if (message.role === 'user') {
     const text = message.parts
       .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
@@ -361,7 +363,7 @@ function MessageView({ message, onApprove, onDeny }: MessageViewProps) {
 
   const flushText = () => {
     if (textBuffer.length === 0) return;
-    rendered.push(<BlockRenderer key={key++} content={textBuffer} />);
+    rendered.push(<BlockRenderer key={key++} content={textBuffer} streaming={streaming} />);
     textBuffer = '';
   };
 

@@ -76,6 +76,14 @@ export interface SparklineChartProps {
   total?: number | string;
 }
 
+export interface ErrorCardProps {
+  title: string;
+  message: string;
+  status_code?: number;
+  endpoint?: string;
+  suggestion?: string;
+}
+
 /** Discriminated union for all known block types. */
 export type Block =
   | { type: "KPICard"; props: KPICardProps }
@@ -83,6 +91,7 @@ export type Block =
   | { type: "ProductCard"; props: ProductCardProps }
   | { type: "OrderTimeline"; props: OrderTimelineProps }
   | { type: "InventoryBar"; props: InventoryBarProps }
-  | { type: "SparklineChart"; props: SparklineChartProps };
+  | { type: "SparklineChart"; props: SparklineChartProps }
+  | { type: "ErrorCard"; props: ErrorCardProps };
 
 export type BlockType = Block["type"];

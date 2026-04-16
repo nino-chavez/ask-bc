@@ -29,8 +29,9 @@ const SUGGESTIONS = [
   'Give me a KPI summary of my store',
   'Show me my 5 most expensive products',
   'Which products are low on inventory?',
+  'What is the status of order #136?',
   'Create a coupon called SUMMER25 for 25% off',
-  'Set the Carmel Leather Sectional to hidden on the storefront',
+  'How do I set up free shipping on orders over $50?',
 ];
 
 export default function WorkerChatPage() {

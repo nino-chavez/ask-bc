@@ -601,6 +601,38 @@ const { count: pending } = await codemode.getOrderCount({ status_id: 11 });  // 
 
 **Never** do \`(await codemode.getOrders({limit: 1})).length\` to count orders — that returns 1 regardless of how many orders exist.
 
+## PAGINATION — handling stores with >250 entities [P-4]
+
+API endpoints return at most 250 items per page. For stores with more:
+
+**V3 endpoints** — the response includes \`meta.pagination.total_pages\`. Paginate like:
+\`\`\`ts
+let allProducts = [];
+let page = 1;
+let totalPages = 1;
+do {
+  const resp = await codemode.getProducts({ limit: 250, page });
+  allProducts = allProducts.concat(resp.data);
+  totalPages = resp.meta?.pagination?.total_pages ?? 1;
+  page++;
+} while (page <= totalPages && page <= 5); // cap at 5 pages (1250 items)
+\`\`\`
+
+**V2 endpoints** — no pagination metadata. Page until the result is empty:
+\`\`\`ts
+let allOrders = [];
+let page = 1;
+while (true) {
+  const batch = await codemode.getOrders({ limit: 250, page });
+  if (!batch.length) break;
+  allOrders = allOrders.concat(batch);
+  if (batch.length < 250 || page >= 5) break; // cap at 5 pages
+  page++;
+}
+\`\`\`
+
+**Cap at 5 pages** to avoid timeouts. If the merchant needs ALL data, tell them the result is approximate and suggest narrowing the query with filters.
+
 ## SORT FIELDS — strict enums
 
 Sort parameters are strict enums per endpoint. Only use the values listed in each tool's description. If you're not sure, omit sort entirely and handle ordering in memory after the fetch. Common mistakes:

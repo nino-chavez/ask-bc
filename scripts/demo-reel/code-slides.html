@@ -145,7 +145,7 @@
 <!-- Slide 11: Typed SDK -->
 <div class="slide" id="s11">
   <span class="badge">Typed BigCommerce SDK</span>
-  <h1>11 OpenAPI specs → 35,000 lines of types → 19 tools</h1>
+  <h1>14 OpenAPI specs → 41,000 lines of types → 29 tools</h1>
   <div class="code"><span class="cm">// Read tools (inside codemode sandbox)</span>
 <span class="fn">getProducts</span>      <span class="cm">// V3 /catalog/products — filter, sort, paginate</span>
 <span class="fn">getProduct</span>       <span class="cm">// V3 /catalog/products/{id} — with variants, images</span>
@@ -163,11 +163,22 @@
 <span class="fn">getCoupons</span>       <span class="cm">// V2 — manual discount codes</span>
 <span class="fn">getChannels</span>      <span class="cm">// V3 — multi-storefront topology</span>
 
-<span class="cm">// Write tools (top-level, outside sandbox)</span>
+<span class="fn">getStoreInfo</span>     <span class="cm">// V2 — plan, domain, currency, timezone</span>
+<span class="fn">getShippingZones</span> <span class="cm">// V2 — zone configuration</span>
+<span class="fn">getShippingMethods</span> <span class="cm">// V2 — rates per zone</span>
+<span class="fn">getTaxSettings</span>   <span class="cm">// V3 — tax configuration</span>
+<span class="fn">getOrderRefunds</span>  <span class="cm">// V3 — refund history</span>
+<span class="fn">getCustomerAddresses</span> <span class="cm">// V3 — shipping addresses</span>
+<span class="fn">searchDocumentation</span> <span class="cm">// help docs keyword search</span>
+
+<span class="cm">// Write tools (top-level, two-turn confirmation)</span>
 <span class="fn">createCoupon</span>          <span class="cm">// POST /v2/coupons</span>
+<span class="fn">deleteCoupon</span>          <span class="cm">// DELETE /v2/coupons/{id}</span>
 <span class="fn">updateProductInventory</span> <span class="cm">// PUT /v3/catalog/products/{id}</span>
 <span class="fn">setProductVisibility</span>  <span class="cm">// PUT /v3/catalog/products/{id}</span>
-<span class="fn">updateProductPrice</span>    <span class="cm">// PUT /v3/catalog/products/{id}</span></div>
+<span class="fn">updateProductPrice</span>    <span class="cm">// PUT /v3/catalog/products/{id}</span>
+<span class="fn">updateOrderStatus</span>     <span class="cm">// PUT /v2/orders/{id}</span>
+<span class="fn">createProduct</span>         <span class="cm">// POST /v3/catalog/products</span></div>
 </div>
 
 <script>

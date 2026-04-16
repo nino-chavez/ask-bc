@@ -16,7 +16,7 @@ Ask BC is an AI agent embedded in the BigCommerce admin control panel. Merchants
 
 The agent has two categories of tools: read tools and write tools. They differ fundamentally in how they execute and what safety controls apply.
 
-### Read Tools (15)
+### Read Tools (22)
 
 Read tools execute inside a Codemode sandbox — the model writes a TypeScript script using `codemode.*` proxy functions, and the Worker executes it in an isolated Dynamic Worker. The model can chain multiple reads in a single script using `Promise.all`, join across APIs in memory, and return aggregated results. BC credentials are injected by the host and never appear in generated scripts.
 
@@ -39,6 +39,7 @@ Read tools execute inside a Codemode sandbox — the model writes a TypeScript s
 | `getOrderProducts` | V2 `/orders/{id}/products` | `order_id`, `limit` | Line items — product_id, name, sku, quantity, price_ex_tax |
 | `getOrderCount` | V2 `/orders/count` | `status_id`, date range | `{count: number}` plus per-status breakdown — use this for count questions |
 | `getOrderShippingAddresses` | V2 `/orders/{id}/shipping_addresses` | `order_id` | Shipping address(es) including multi-address orders |
+| `getOrderRefunds` | V3 `/orders/{id}/payment_actions/refunds` | `order_id` | Refund records — amount, reason, created_at |
 
 Order status_id reference:
 
@@ -65,10 +66,20 @@ Order status_id reference:
 | Tool | BC API | Key Inputs | Returns |
 |------|--------|-----------|---------|
 | `getCustomers` | V3 `/customers` | `email`, `company`, `date_created_min`, `date_created_max` | `{data: Customer[]}` |
+| `getCustomerAddresses` | V3 `/customers/addresses` | `customer_id`, `limit`, `page` | Saved shipping/billing addresses per customer |
 | `getInventoryLocations` | V3 `/inventory/locations` | `limit`, `page` | Warehouses, retail stores — id, code, type |
 | `getPromotions` | V3 `/promotions` | `status` (ENABLED/DISABLED) | Automatic discounts with rules and redemption counts |
 | `getCoupons` | V2 `/coupons` | `code` (exact match) | Manual discount codes — code, type, amount, expires |
 | `getChannels` | V3 `/channels` | `available` | Storefronts, marketplaces, POS channels |
+
+**Store Configuration**
+
+| Tool | BC API | Key Inputs | Returns |
+|------|--------|-----------|---------|
+| `getStoreInfo` | V2 `/store` | — | Store name, domain, default currency, timezone, plan |
+| `getShippingZones` | V2 `/shipping/zones` | — | All configured shipping zones with id, name, type |
+| `getShippingMethods` | V2 `/shipping/zones/{id}/methods` | `zone_id` | Carrier and rate methods for a specific zone |
+| `getTaxSettings` | V3 `/tax/settings` | — | Tax configuration — enabled status, pricing display, class ids |
 
 **Documentation Search**
 
@@ -90,7 +101,7 @@ This is the most common source of errors when extending the tool surface:
 
 ---
 
-## Write Tools (5)
+## Write Tools (7)
 
 Write tools execute outside the Codemode sandbox as top-level AI SDK tool calls. They are structurally unavailable inside Codemode — the model cannot call them from generated scripts, only directly.
 
@@ -110,6 +121,8 @@ All confirmed writes are recorded in the Durable Object's SQLite `write_audit` t
 | `setProductVisibility` | V3 `PUT /catalog/products/{id}` | Set `is_visible: true/false` (publish/unpublish) | `"Will publish/unpublish product {id}"` |
 | `updateProductPrice` | V3 `PUT /catalog/products/{id}` | Update `price` and/or `sale_price` | Shows new price values |
 | `deleteCoupon` | V2 `DELETE /coupons/{id}` | Delete a coupon permanently | Warns this cannot be undone |
+| `updateOrderStatus` | V2 `PUT /orders/{id}` | Set `status_id` on an order | Shows order id and new status label |
+| `createProduct` | V3 `POST /catalog/products` | Create a new product listing with name, type, price, and optional fields | Preview with all product parameters |
 
 ### Write Tool Business Rules
 
@@ -240,13 +253,15 @@ The BC app requires these OAuth scopes for full functionality:
 
 | Scope | Tools That Need It |
 |-------|-------------------|
-| `store_v2_orders` (read/write) | `getOrders`, `getOrder`, `getOrderProducts`, `getOrderCount`, `getOrderShippingAddresses` |
-| `store_v2_products` (read/write) | `getProducts`, `getProduct`, `getProductVariants`, `updateProductInventory`, `setProductVisibility`, `updateProductPrice` |
-| `store_v2_customers` (read) | `getCustomers` |
+| `store_v2_orders` (read/write) | `getOrders`, `getOrder`, `getOrderProducts`, `getOrderCount`, `getOrderShippingAddresses`, `getOrderRefunds`, `updateOrderStatus` |
+| `store_v2_products` (read/write) | `getProducts`, `getProduct`, `getProductVariants`, `updateProductInventory`, `setProductVisibility`, `updateProductPrice`, `createProduct` |
+| `store_v2_customers` (read) | `getCustomers`, `getCustomerAddresses` |
 | `store_v2_marketing` (read/write) | `getPromotions`, `getCoupons`, `createCoupon`, `deleteCoupon` |
-| `store_v2_information_read_only` | `getChannels` |
+| `store_v2_information_read_only` | `getChannels`, `getStoreInfo` |
 | `store_inventory` (read) | `getInventoryLocations` |
 | `store_content` (read) | `getCategories`, `getBrands` |
+| `store_v2_shipping` (read) | `getShippingZones`, `getShippingMethods` |
+| `store_v2_tax` (read) | `getTaxSettings` |
 | `store_app_extensions_manage` | App Extension registration during OAuth install |
 
 Adding new BC API scopes to the app requires merchants to reinstall (the OAuth flow re-prompts for scope approval).

@@ -5,7 +5,7 @@ AI-powered store assistant for BigCommerce merchants.
 ## Features
 
 - **Chat with your store data** — ask about orders, products, customers, promotions
-- **20 BC API tools** — 15 read tools + 5 write tools against real BC REST APIs
+- **29 BC API tools** — 22 read tools + 7 write tools against real BC REST APIs
 - **Generative UI** — 7 React block components rendered inline in the chat (KPICard, DataTable, ProductCard, OrderTimeline, InventoryBar, SparklineChart, ErrorCard)
 - **Write operations** — create coupons, update inventory, toggle visibility, update pricing — with a two-turn confirmation pattern before any mutation
 - **App Extension panels** — contextual "Ask BC" on Orders and Products pages

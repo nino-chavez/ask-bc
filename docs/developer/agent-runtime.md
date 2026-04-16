@@ -100,7 +100,7 @@ In practice Haiku handles ~95% of turns. Sonnet activates on retries and write e
 
 ## Tool Architecture
 
-### Read Tools (15)
+### Read Tools (22)
 
 Defined in `buildReadTools(env, bc)`. Registered inside `createExecuteTool()` so they become `codemode.*` functions in the TypeScript sandbox. Credentials never appear in generated scripts.
 
@@ -116,14 +116,20 @@ Defined in `buildReadTools(env, bc)`. Registered inside `createExecuteTool()` so
 | `getOrderProducts` | V2 `/orders/{id}/products` | Line items — use for product×order joins |
 | `getOrderCount` | V2 `/orders/count` | Count orders without fetching — use for "how many" questions |
 | `getOrderShippingAddresses` | V2 `/orders/{id}/shipping_addresses` | Multi-address shipping info |
+| `getOrderRefunds` | V3 `/orders/{id}/payment_actions/refunds` | Refund records for a specific order |
 | `getCustomers` | V3 `/customers` | List/filter customers by email, company, date |
+| `getCustomerAddresses` | V3 `/customers/addresses` | Saved addresses for customers |
 | `getInventoryLocations` | V3 `/inventory/locations` | Warehouses and inventory sites |
 | `getPromotions` | V3 `/promotions` | Automatic discounts (BOGO, % off) |
 | `getCoupons` | V2 `/coupons` | Manual discount codes |
 | `getChannels` | V3 `/channels` | Multi-storefront/marketplace topology |
+| `getStoreInfo` | V2 `/store` | Store metadata — name, domain, currency, timezone |
+| `getShippingZones` | V2 `/shipping/zones` | Configured shipping zones |
+| `getShippingMethods` | V2 `/shipping/zones/{id}/methods` | Methods available within a shipping zone |
+| `getTaxSettings` | V3 `/tax/settings` | Store tax configuration |
 | `searchDocumentation` | Internal | BC help docs keyword search |
 
-### Write Tools (5)
+### Write Tools (7)
 
 Defined in `buildWriteTools(env, bc, auditLog)`. Registered as top-level tools **outside** the Codemode sandbox — the model calls them directly as tool calls, not from inside a generated script. Write tools are structurally unavailable inside Codemode.
 
@@ -140,6 +146,8 @@ Each write tool has a `confirmed: boolean` parameter. The two-turn pattern is en
 | `setProductVisibility` | V3 `PUT /catalog/products/{id}` | Publish or unpublish a product |
 | `updateProductPrice` | V3 `PUT /catalog/products/{id}` | Update price and/or sale_price |
 | `deleteCoupon` | V2 `DELETE /coupons/{id}` | Delete a coupon by ID |
+| `updateOrderStatus` | V2 `PUT /orders/{id}` | Set status_id on an order |
+| `createProduct` | V3 `POST /catalog/products` | Create a new product listing |
 
 All confirmed writes are logged to the Durable Object's SQLite `write_audit` table via `logWrite()`.
 
@@ -219,7 +227,7 @@ async beforeTurn(ctx: { continuation: boolean; body?: Record<string, unknown>; s
 | Phase | Status | Description |
 |-------|--------|-------------|
 | 0 — De-risk Project Think | Complete | Worker + Think + Codemode + Dynamic Workers proven end-to-end on real BC data |
-| 1 — Typed BC SDK + full tool surface | Complete | 11 OpenAPI specs → openapi-typescript → openapi-fetch clients. 15 read tools. V2 empty-body middleware. Enriched system prompt with API shape rules, status_id table, counting patterns, pagination patterns. Verified: 3-way customer × orders × line-items join in 8.3s. |
+| 1 — Typed BC SDK + full tool surface | Complete | 14 OpenAPI specs → openapi-typescript → openapi-fetch clients. 22 read tools, 7 write tools. V2 empty-body middleware. Enriched system prompt with API shape rules, status_id table, counting patterns, pagination patterns. Verified: 3-way customer × orders × line-items join in 8.3s. Tool set validated against Shopify Sidekick feature parity. |
 | 2 — Generative UI | Complete | 7 React block components, block protocol (fenced `block` JSON), Next.js inline renderer, WorkerChatPanel connecting directly to Worker via WebSocket |
 | 3 — Writes with approval gate | Complete | 5 write tools, two-turn confirmation pattern, audit log in DO SQLite, AES-256-GCM credential encryption, JWT auth gate on WebSocket upgrade, CORS hardening |
 | 4 — Demo reel recapture | Pending | Re-record the 12-scene reel against the new stack |

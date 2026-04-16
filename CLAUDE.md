@@ -111,13 +111,13 @@ The original `/stores/[storeHash]/api/chat` route using `streamText()` + `useCha
 
 ### Tool Architecture
 
-**Read tools** (15 total) — run inside the Codemode sandbox:
-`getProducts`, `getProduct`, `getProductVariants`, `getCategories`, `getBrands`, `getOrders`, `getOrder`, `getOrderProducts`, `getOrderCount`, `getOrderShippingAddresses`, `getCustomers`, `getInventoryLocations`, `getPromotions`, `getCoupons`, `getChannels`, `searchDocumentation`
+**Read tools** (22 total) — run inside the Codemode sandbox:
+`getProducts`, `getProduct`, `getProductVariants`, `getCategories`, `getBrands`, `getOrders`, `getOrder`, `getOrderProducts`, `getOrderCount`, `getOrderShippingAddresses`, `getOrderRefunds`, `getCustomers`, `getCustomerAddresses`, `getInventoryLocations`, `getPromotions`, `getCoupons`, `getChannels`, `getStoreInfo`, `getShippingZones`, `getShippingMethods`, `getTaxSettings`, `searchDocumentation`
 
 Read tools are exposed as `codemode.*` functions. The model writes a TypeScript script using them, Codemode executes it, and the result comes back as a tool output. Credentials never appear in the generated script.
 
-**Write tools** (5 total) — top-level tools outside the sandbox:
-`createCoupon`, `updateProductInventory`, `setProductVisibility`, `updateProductPrice`, `deleteCoupon`
+**Write tools** (7 total) — top-level tools outside the sandbox:
+`createCoupon`, `updateProductInventory`, `setProductVisibility`, `updateProductPrice`, `deleteCoupon`, `updateOrderStatus`, `createProduct`
 
 Each write tool has a `confirmed: boolean` parameter. The model must call with `confirmed: false` first (returns a preview), then call again with `confirmed: true` after the merchant confirms. This is enforced at the prompt level and structurally — write tools are never registered inside the Codemode sandbox.
 

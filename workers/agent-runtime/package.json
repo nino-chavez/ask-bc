@@ -15,10 +15,12 @@
     "@cloudflare/think": "^0.2.4",
     "agents": "^0.11.0",
     "ai": "^6.0.162",
+    "openapi-fetch": "^0.17.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250214.0",
+    "openapi-typescript": "^7.13.0",
     "typescript": "^5.9.2",
     "wrangler": "^4.50.0"
   }

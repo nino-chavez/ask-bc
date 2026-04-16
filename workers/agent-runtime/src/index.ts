@@ -4,6 +4,7 @@ import { routeAgentRequest } from "agents";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { tool, type LanguageModel } from "ai";
 import { z } from "zod";
+import { createBcClients } from "./bc/client.js";
 
 interface Env {
   ASK_BC: DurableObjectNamespace;
@@ -14,90 +15,313 @@ interface Env {
   BC_API_BASE: string;
 }
 
-// ─── BC API helpers ────────────────────────────────────────────────
-// The host holds credentials. Sandbox code calls these via codemode.* RPC —
-// credentials never appear in generated code.
-
-function bcHeaders(env: Env): HeadersInit {
-  return {
-    "X-Auth-Token": env.BC_ACCESS_TOKEN,
-    Accept: "application/json",
-    "Content-Type": "application/json",
-  };
-}
-
-function bcUrl(env: Env, path: string, version: "v2" | "v3" = "v3"): string {
-  const base = env.BC_API_BASE.replace(/\/$/, "");
-  return `${base}/stores/${env.BC_STORE_HASH}/${version}${path}`;
-}
-
-async function bcGet(env: Env, path: string, version: "v2" | "v3" = "v3") {
-  const res = await fetch(bcUrl(env, path, version), {
-    headers: bcHeaders(env),
-  });
-  if (!res.ok) {
-    throw new Error(`BC ${version} GET ${path} failed: ${res.status} ${await res.text()}`);
-  }
-  return res.json();
-}
-
-// ─── BC tools (Phase 0: minimum viable surface) ────────────────────
-// Phase 1 will generate these from the BC OpenAPI spec. For now, four
-// hand-written tools are enough to prove the codemode loop works.
+// ─── BC tool surface ───────────────────────────────────────────────
+// Typed tools backed by openapi-fetch clients generated from the
+// BigCommerce OpenAPI specs. Each tool wraps one endpoint with a Zod
+// input schema and a typed execute. Credentials live in the host env
+// and never touch generated code — the sandbox only sees `codemode.*`
+// RPC calls that resolve to these execute functions.
 
 function buildBcTools(env: Env) {
+  const bc = createBcClients(env);
+
+  // Tiny helper: unwrap openapi-fetch's {data, error} tuple into either
+  // the data or a thrown error with the spec path for debuggability.
+  const u = <T>(r: { data?: T; error?: unknown }, ctx: string): T => {
+    if (r.error) throw new Error(`BC ${ctx} failed: ${JSON.stringify(r.error)}`);
+    if (r.data === undefined) throw new Error(`BC ${ctx} returned no data`);
+    return r.data;
+  };
+
   return {
+    // ─── Catalog: Products ──────────────────────────────────────────
     getProducts: tool({
       description:
-        "Fetch products from the BigCommerce store. Returns an array of products with id, name, price, inventory_level, categories, etc.",
+        "List products. Supports filter by name/sku, sort by inventory_level/name/date_modified, pagination. Returns {data: Product[], meta: {pagination}}.",
       inputSchema: z.object({
-        limit: z.number().int().min(1).max(250).default(50).describe("Max products to return (1-250)"),
+        limit: z.number().int().min(1).max(250).default(50),
         page: z.number().int().min(1).default(1),
-        sort: z.enum(["name", "date_created", "total_sold", "inventory_level"]).optional(),
+        sort: z
+          .enum(["name", "sku", "date_modified", "date_last_imported", "inventory_level", "is_visible"])
+          .optional(),
         direction: z.enum(["asc", "desc"]).optional(),
+        include_fields: z.string().optional().describe("Comma-separated fields to include (e.g. 'name,price,inventory_level')"),
+        name_like: z.string().optional().describe("Case-insensitive name substring match"),
+        sku: z.string().optional(),
+        is_visible: z.boolean().optional(),
+        categories: z.array(z.number().int()).optional().describe("Filter by category ids"),
       }),
-      execute: async ({ limit, page, sort, direction }) => {
-        const params = new URLSearchParams({ limit: String(limit), page: String(page) });
-        if (sort) params.set("sort", sort);
-        if (direction) params.set("direction", direction);
-        return bcGet(env, `/catalog/products?${params}`);
+      execute: async ({ limit, page, sort, direction, include_fields, name_like, sku, is_visible, categories }) => {
+        const query: Record<string, unknown> = { limit, page };
+        if (sort) query.sort = sort;
+        if (direction) query.direction = direction;
+        if (include_fields) query.include_fields = include_fields;
+        if (name_like) query["name:like"] = name_like;
+        if (sku) query.sku = sku;
+        if (is_visible !== undefined) query.is_visible = is_visible;
+        if (categories?.length) query["categories:in"] = categories.join(",");
+        return u(
+          await bc.products.GET("/catalog/products", {
+            params: { query: query as never, header: { Accept: "application/json" } },
+          }),
+          "GET /catalog/products",
+        );
       },
     }),
 
+    getProduct: tool({
+      description: "Fetch a single product by id with full details including variants, images, custom fields.",
+      inputSchema: z.object({
+        product_id: z.number().int().positive(),
+        include: z
+          .array(z.enum(["variants", "images", "custom_fields", "bulk_pricing_rules", "primary_image", "modifiers", "options", "videos"]))
+          .optional(),
+      }),
+      execute: async ({ product_id, include }) =>
+        u(
+          await bc.products.GET("/catalog/products/{product_id}", {
+            params: {
+              path: { product_id },
+              query: include?.length ? ({ include: include.join(",") } as never) : undefined,
+              header: { Accept: "application/json" },
+            },
+          }),
+          `GET /catalog/products/${product_id}`,
+        ),
+    }),
+
+    getProductVariants: tool({
+      description: "List variants for a product. Returns sku, price, inventory_level, option_values per variant.",
+      inputSchema: z.object({
+        product_id: z.number().int().positive(),
+        limit: z.number().int().min(1).max(250).default(50),
+      }),
+      execute: async ({ product_id, limit }) =>
+        u(
+          await bc.variants.GET("/catalog/products/{product_id}/variants", {
+            params: {
+              path: { product_id },
+              query: { limit },
+              header: { Accept: "application/json", "Content-Type": "application/json" },
+            },
+          }),
+          `GET /catalog/products/${product_id}/variants`,
+        ),
+    }),
+
+    // ─── Catalog: Categories & Brands ───────────────────────────────
+    getCategories: tool({
+      description: "List product categories. Categories form a tree — parent_id=0 is a root category.",
+      inputSchema: z.object({
+        limit: z.number().int().min(1).max(250).default(50),
+        page: z.number().int().min(1).default(1),
+        parent_id: z.number().int().optional(),
+      }),
+      execute: async ({ limit, page, parent_id }) => {
+        const query: Record<string, unknown> = { limit, page };
+        if (parent_id !== undefined) query.parent_id = parent_id;
+        return u(
+          await bc.categories.GET("/catalog/categories", {
+            params: { query: query as never, header: { Accept: "application/json" } },
+          }),
+          "GET /catalog/categories",
+        );
+      },
+    }),
+
+    getBrands: tool({
+      description: "List brands (manufacturers).",
+      inputSchema: z.object({
+        limit: z.number().int().min(1).max(250).default(50),
+        page: z.number().int().min(1).default(1),
+      }),
+      execute: async ({ limit, page }) =>
+        u(
+          await bc.brands.GET("/catalog/brands", {
+            params: { query: { limit, page }, header: { Accept: "application/json" } },
+          }),
+          "GET /catalog/brands",
+        ),
+    }),
+
+    // ─── Orders (V2 — the canonical orders API) ─────────────────────
     getOrders: tool({
       description:
-        "Fetch orders from the BigCommerce store. Returns orders with id, status, total_inc_tax, customer_id, date_created, etc. Uses V2 API.",
+        "List orders. Use status_id to filter (5=Completed, 11=Awaiting Fulfillment, 7=Awaiting Payment, 10=Disputed). Use min_date_created/max_date_created for time windows. Returns orders with total_inc_tax, customer_id, date_created, status.",
       inputSchema: z.object({
         limit: z.number().int().min(1).max(250).default(50),
         page: z.number().int().min(1).default(1),
-        status_id: z.number().int().optional().describe("Filter by status id (e.g. 11=Awaiting Fulfillment)"),
-        min_date_created: z.string().optional().describe("ISO date, inclusive lower bound"),
+        status_id: z.number().int().optional(),
+        customer_id: z.number().int().optional(),
+        min_date_created: z.string().optional().describe("RFC 2822 or ISO 8601"),
+        max_date_created: z.string().optional(),
+        sort: z.enum(["id:asc", "id:desc", "date_created:asc", "date_created:desc", "total_inc_tax:asc", "total_inc_tax:desc"]).optional(),
       }),
-      execute: async ({ limit, page, status_id, min_date_created }) => {
-        const params = new URLSearchParams({ limit: String(limit), page: String(page) });
-        if (status_id !== undefined) params.set("status_id", String(status_id));
-        if (min_date_created) params.set("min_date_created", min_date_created);
-        return bcGet(env, `/orders?${params}`, "v2");
+      execute: async ({ limit, page, status_id, customer_id, min_date_created, max_date_created, sort }) => {
+        const query: Record<string, unknown> = { limit, page };
+        if (status_id !== undefined) query.status_id = status_id;
+        if (customer_id !== undefined) query.customer_id = customer_id;
+        if (min_date_created) query.min_date_created = min_date_created;
+        if (max_date_created) query.max_date_created = max_date_created;
+        if (sort) query.sort = sort;
+        return u(
+          await bc.orders.GET("/orders", {
+            params: {
+              query: query as never,
+              header: { Accept: "application/json", "Content-Type": "application/json" },
+            },
+          }),
+          "GET /v2/orders",
+        );
       },
     }),
 
+    getOrder: tool({
+      description: "Fetch a single order by id with full details.",
+      inputSchema: z.object({ order_id: z.number().int().positive() }),
+      execute: async ({ order_id }) =>
+        u(
+          await bc.orders.GET("/orders/{order_id}", {
+            params: {
+              path: { order_id },
+              header: { Accept: "application/json", "Content-Type": "application/json" },
+            },
+          }),
+          `GET /v2/orders/${order_id}`,
+        ),
+    }),
+
+    getOrderProducts: tool({
+      description: "Line items for an order — product_id, name, sku, quantity, price_ex_tax, base_total. Use this to join orders back to the product catalog.",
+      inputSchema: z.object({
+        order_id: z.number().int().positive(),
+        limit: z.number().int().min(1).max(250).default(50),
+      }),
+      execute: async ({ order_id, limit }) =>
+        u(
+          await bc.orders.GET("/orders/{order_id}/products", {
+            params: {
+              path: { order_id },
+              query: { limit },
+              header: { Accept: "application/json", "Content-Type": "application/json" },
+            },
+          }),
+          `GET /v2/orders/${order_id}/products`,
+        ),
+    }),
+
+    getOrderShippingAddresses: tool({
+      description: "Shipping addresses for an order (supports multi-address orders).",
+      inputSchema: z.object({ order_id: z.number().int().positive() }),
+      execute: async ({ order_id }) =>
+        u(
+          await bc.orders.GET("/orders/{order_id}/shipping_addresses", {
+            params: { path: { order_id }, header: { Accept: "application/json" } },
+          }),
+          `GET /v2/orders/${order_id}/shipping_addresses`,
+        ),
+    }),
+
+    // ─── Customers ──────────────────────────────────────────────────
     getCustomers: tool({
       description:
-        "Fetch customers from the BigCommerce store. Returns customers with id, email, first_name, last_name, date_created, etc.",
+        "List customers. Supports filter by email, company, date_created window. Returns id, email, first_name, last_name, phone, date_created.",
+      inputSchema: z.object({
+        limit: z.number().int().min(1).max(250).default(50),
+        page: z.number().int().min(1).default(1),
+        email: z.string().optional().describe("Exact match on email"),
+        company: z.string().optional(),
+        date_created_min: z.string().optional().describe("ISO 8601 lower bound"),
+        date_created_max: z.string().optional(),
+      }),
+      execute: async ({ limit, page, email, company, date_created_min, date_created_max }) => {
+        const query: Record<string, unknown> = { limit, page };
+        if (email) query["email:in"] = email;
+        if (company) query["company:in"] = company;
+        if (date_created_min) query["date_created:min"] = date_created_min;
+        if (date_created_max) query["date_created:max"] = date_created_max;
+        return u(
+          await bc.customers.GET("/customers", {
+            params: { query: query as never },
+          }),
+          "GET /customers",
+        );
+      },
+    }),
+
+    // ─── Inventory ──────────────────────────────────────────────────
+    getInventoryLocations: tool({
+      description: "List inventory locations (warehouses, retail stores). Returns location_id, code, type, managed_by_external_source.",
       inputSchema: z.object({
         limit: z.number().int().min(1).max(250).default(50),
         page: z.number().int().min(1).default(1),
       }),
-      execute: async ({ limit, page }) => {
-        const params = new URLSearchParams({ limit: String(limit), page: String(page) });
-        return bcGet(env, `/customers?${params}`);
+      execute: async ({ limit, page }) =>
+        u(
+          await bc.locations.GET("/inventory/locations", {
+            params: { query: { limit, page }, header: { Accept: "application/json" } },
+          }),
+          "GET /inventory/locations",
+        ),
+    }),
+
+    // ─── Promotions (V3) ────────────────────────────────────────────
+    getPromotions: tool({
+      description: "List promotions (automatic discounts like BOGO, percentage off). Returns id, name, status, rules, redemption_count.",
+      inputSchema: z.object({
+        limit: z.number().int().min(1).max(250).default(50),
+        page: z.number().int().min(1).default(1),
+        status: z.enum(["ENABLED", "DISABLED"]).optional(),
+      }),
+      execute: async ({ limit, page, status }) => {
+        const query: Record<string, unknown> = { limit, page };
+        if (status) query.status = status;
+        return u(
+          await bc.promotions.GET("/promotions", {
+            params: { query: query as never, header: { Accept: "application/json" } },
+          }),
+          "GET /promotions",
+        );
       },
     }),
 
-    getStoreInfo: tool({
-      description: "Fetch store metadata: name, domain, currency, timezone, plan, etc.",
-      inputSchema: z.object({}),
-      execute: async () => bcGet(env, "/store", "v2"),
+    // ─── Marketing V2 — Coupons ─────────────────────────────────────
+    getCoupons: tool({
+      description: "List coupon codes (manual discount codes, not automatic promotions). Returns code, type, amount, min_purchase, expires, enabled.",
+      inputSchema: z.object({
+        limit: z.number().int().min(1).max(250).default(50),
+        page: z.number().int().min(1).default(1),
+        code: z.string().optional().describe("Exact match on coupon code"),
+      }),
+      execute: async ({ limit, page, code }) => {
+        const query: Record<string, unknown> = { limit, page };
+        if (code) query.code = code;
+        return u(
+          await bc.marketing.GET("/coupons", {
+            params: { query: query as never, header: { Accept: "application/json" } },
+          }),
+          "GET /v2/coupons",
+        );
+      },
+    }),
+
+    // ─── Channels ───────────────────────────────────────────────────
+    getChannels: tool({
+      description:
+        "List sales channels (storefronts, marketplaces, point of sale). Returns id, name, type, platform, status. Use this to understand the store's multi-channel topology.",
+      inputSchema: z.object({
+        available: z.boolean().optional().describe("Only return active channels"),
+      }),
+      execute: async ({ available }) =>
+        u(
+          await bc.channels.GET("/channels", {
+            params: {
+              query: available !== undefined ? { available } : undefined,
+              header: { Accept: "application/json" },
+            },
+          }),
+          "GET /channels",
+        ),
     }),
   };
 }
@@ -109,21 +333,74 @@ const SYSTEM_PROMPT = `You are Ask BC, an AI assistant for BigCommerce merchants
 You have ONE tool: \`execute\`. It runs TypeScript you write in an isolated sandbox.
 Inside the sandbox you have typed \`codemode.*\` functions that proxy to real BC APIs.
 
-RULES:
+## RULES
+
 1. ALWAYS use codemode to fetch real store data. Never guess or fabricate.
-2. For multi-step questions, write ONE script that chains calls — do not make multiple execute calls back-to-back.
-3. Return results via \`return\` at the end of your script. The return value will be shown to the merchant.
+2. For multi-step questions, write ONE script that chains calls — do not make multiple execute calls back-to-back. Use \`Promise.all\` for independent fetches.
+3. Return a structured result via \`return\` at the end of your script. The return value will be shown to the merchant.
 4. The sandbox has no outbound network access except via codemode.* — don't try fetch(), it will throw.
 5. Keep scripts focused: fetch what you need, aggregate in memory, return a structured result.
 
-Example — "What are my top products by inventory?":
+## API RESPONSE SHAPES — READ THIS CAREFULLY
+
+BigCommerce has TWO API versions (V2 and V3) with DIFFERENT response shapes. Getting this wrong is the #1 cause of script errors.
+
+**V3 endpoints** (\`getProducts\`, \`getCategories\`, \`getBrands\`, \`getCustomers\`, \`getProductVariants\`, \`getPromotions\`, \`getChannels\`, \`getInventoryLocations\`):
+- Return an **envelope**: \`{ data: T[], meta: { pagination: {...} } }\`
+- Destructure like: \`const { data: products } = await codemode.getProducts(...)\`
+- Numeric fields are **numbers** (\`price\`, \`inventory_level\`, etc.)
+
+**V2 endpoints** (\`getOrders\`, \`getOrder\`, \`getOrderProducts\`, \`getOrderShippingAddresses\`, \`getCoupons\`):
+- Return a **bare array** or object — NO envelope. Do NOT destructure \`data\` from V2 responses.
+- Use like: \`const orders = await codemode.getOrders(...)\`
+- **Numeric fields are STRINGS** — \`total_inc_tax\`, \`subtotal_inc_tax\`, \`total_ex_tax\` all come back as strings like \`"1952.19"\`. Always parseFloat before doing math or .toFixed.
+- Guest checkouts have \`customer_id: 0\` — filter these out when analyzing customer-order relationships.
+- Empty results return an empty body that the client patches to \`[]\` — so \`orders.length === 0\` is the correct empty check.
+
+## ORDER STATUS IDS (V2)
+
+Common values for \`getOrders({ status_id })\`:
+- 0 = Incomplete, 1 = Pending, 2 = Shipped, 3 = Partially Shipped
+- 4 = Refunded, 5 = Cancelled, 6 = Declined, 7 = Awaiting Payment
+- 8 = Awaiting Pickup, 9 = Awaiting Shipment, 10 = Completed
+- 11 = Awaiting Fulfillment, 12 = Manual Verification Required, 13 = Disputed, 14 = Partially Refunded
+
+Note: status_id=5 is **Cancelled**, not Completed. For "completed orders" use status_id=10.
+
+## EXAMPLES
+
+**"Top products by inventory"**:
 \`\`\`ts
 const { data: products } = await codemode.getProducts({ limit: 100, sort: "inventory_level", direction: "desc" });
-return products.slice(0, 10).map(p => ({
-  name: p.name,
-  inventory: p.inventory_level,
-  price: p.price,
+return products.slice(0, 10).map(p => ({ name: p.name, inventory: p.inventory_level, price: p.price }));
+\`\`\`
+
+**"5 most recent orders with customer info"** (note: V2 bare array, string totals):
+\`\`\`ts
+const orders = await codemode.getOrders({ limit: 5, sort: "date_created:desc" });
+const customerIds = [...new Set(orders.map(o => o.customer_id).filter(id => id > 0))];
+const customerPromises = customerIds.map(id => codemode.getCustomers({ email: undefined })); // or fetch all + filter
+return orders.map(o => ({
+  id: o.id,
+  total: parseFloat(o.total_inc_tax).toFixed(2),  // parseFloat first!
+  customer_id: o.customer_id,
+  date: o.date_created,
+  is_guest: o.customer_id === 0,
 }));
+\`\`\`
+
+**"Customer order frequency breakdown"** (join V3 customers with V2 orders):
+\`\`\`ts
+const [{ data: customers }, orders] = await Promise.all([
+  codemode.getCustomers({ limit: 250 }),
+  codemode.getOrders({ limit: 250 }),
+]);
+const countByCustomer = {};
+for (const o of orders) {
+  if (o.customer_id === 0) continue;  // skip guest checkouts
+  countByCustomer[o.customer_id] = (countByCustomer[o.customer_id] || 0) + 1;
+}
+// ... aggregate as needed
 \`\`\`
 
 Be concise. Merchants want answers, not explanations of your process.`;

@@ -133,13 +133,25 @@ Error: Attempting to read .name on AskBC before it was set.
 
 Fix: call `stub.setName(storeHash)` on the DO stub before any other method. Track at [workerd#2240](https://github.com/cloudflare/workerd/issues/2240).
 
-### 4. BC V2 Orders API returns an empty body for "no matching orders"
+### 4. BC V2 endpoints return an empty body for "no matching rows" (FIXED)
 
-BigCommerce's V2 endpoints return HTTP 200 with a completely empty response body when a query matches no rows — instead of `{"data":[]}` like V3. The current `bcGet` helper in `src/index.ts` calls `res.json()` which throws `Unexpected end of JSON input` on empty bodies.
+BigCommerce's V2 endpoints return HTTP 200 with a completely empty response body when a query matches no rows — instead of `{"data":[]}` like V3. Default `response.json()` throws `Unexpected end of JSON input`.
 
-Phase 0 surfaced this during the "top-selling products this month" test. Sonnet and Haiku both recovered by pivoting strategies, but the error wastes a round-trip.
+**Fix:** `src/bc/client.ts` installs an `openapi-fetch` middleware on V2 clients (`orders`, `marketing`) that clones the response, checks if the body is empty, and substitutes `"[]"` when it is. The substituted response carries an `x-bc-empty-body-patched: 1` header for debugging. V3 endpoints don't need this — they return `{data: []}` natively.
 
-**Phase 1 TODO:** Fix `bcGet` to detect empty bodies (check `Content-Length` or `await res.text()` first, handle empty string specially) and return `{ data: [] }` for V2 empty responses.
+```ts
+const v2EmptyBodyMiddleware: Middleware = {
+  async onResponse({ response }) {
+    if (!response.ok) return;
+    const cloned = response.clone();
+    const text = await cloned.text();
+    if (text.length > 0) return;
+    return new Response("[]", { status: response.status, headers: { "content-type": "application/json", "x-bc-empty-body-patched": "1" } });
+  },
+};
+```
+
+Phase 0 surfaced this during the "top-selling products this month" test (2 errors recovered mid-turn). Phase 1 fix verified during the "5 most recent completed orders" test — zero errors, single execute.
 
 ### 5. `beforeTurn` type inference requires explicit `LanguageModel` type
 
@@ -160,10 +172,33 @@ Not doing this produces a wall of "AnthropicProvider is not assignable to Langua
 | Phase | Status | Description |
 |---|---|---|
 | **0 — De-risk Project Think** | ✅ Complete | Worker + Think + Codemode + Dynamic Workers proven end-to-end on real BC data |
-| **1 — Typed BC SDK + full tool surface** | In progress | OpenAPI-generated client, ~20 typed tools covering products/orders/customers/marketing/inventory/channels, fix V2 empty-body bug, port doc search |
+| **1 — Typed BC SDK + full tool surface** | ✅ Complete | 11 OpenAPI specs → openapi-typescript → openapi-fetch clients. 15 typed tools covering products, product variants, categories, brands, orders (V2), order line items, order shipping, customers, inventory locations, promotions (V3), coupons (V2), channels. V2 empty-body middleware patches no-results responses. Enriched system prompt with V2 vs V3 shape rules, status_id table, and canonical example scripts. Verified end-to-end: 3-way customer × orders × line-items join in 8.3s, single execute, zero errors. |
 | **2 — Generative UI** | Pending | Component registry (KPICard, SparklineChart, DataTable, ProductCard, OrderTimeline), structured block streaming, Next.js inline renderer |
 | **3 — Writes with approval gate** | Pending | Re-scope BC API account to modify, AST walk to classify read vs write, approval card in chat, audit log in Durable Object |
 | **4 — Demo reel recapture** | Pending | Re-record the 12-scene reel against the new stack |
+
+## Phase 1 — Tool surface reference
+
+All tools are defined in `src/index.ts` inside `buildBcTools(env)` and resolve into `codemode.*` functions for the sandbox. Tools are typed against OpenAPI-generated path types in `src/bc/*.d.ts`, with inputs validated by Zod. The host holds credentials; generated code never sees them.
+
+| Tool | API | Primary use |
+|---|---|---|
+| `getProducts` | V3 `/catalog/products` | List + filter products (name/sku/category/visibility/sort) |
+| `getProduct` | V3 `/catalog/products/{id}` | Single product with optional includes (variants, images, custom_fields) |
+| `getProductVariants` | V3 `/catalog/products/{id}/variants` | SKU-level inventory and pricing |
+| `getCategories` | V3 `/catalog/categories` | Category tree navigation |
+| `getBrands` | V3 `/catalog/brands` | Manufacturer list |
+| `getOrders` | V2 `/orders` | List orders with status/customer/date filters |
+| `getOrder` | V2 `/orders/{id}` | Single order detail |
+| `getOrderProducts` | V2 `/orders/{id}/products` | Line items — **use this for product×order joins** |
+| `getOrderShippingAddresses` | V2 `/orders/{id}/shipping_addresses` | Multi-address order shipping |
+| `getCustomers` | V3 `/customers` | List customers, filter by email/company/date |
+| `getInventoryLocations` | V3 `/inventory/locations` | Warehouses, retail stores, inventory sites |
+| `getPromotions` | V3 `/promotions` | Automatic discounts (BOGO, % off, rules) |
+| `getCoupons` | V2 `/coupons` | Manual discount codes |
+| `getChannels` | V3 `/channels` | Multi-storefront / marketplace topology |
+
+Pending for later phases: write operations (Phase 3), doc search (port from Vercel side), tax settings, shipping zones, price lists, abandoned carts.
 
 ## Deployment
 

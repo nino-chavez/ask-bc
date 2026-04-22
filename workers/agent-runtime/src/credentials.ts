@@ -24,6 +24,11 @@ interface CredentialEnv {
   CREDENTIAL_ENCRYPTION_KEY?: string;
   BC_STORE_HASH?: string;
   BC_ACCESS_TOKEN?: string;
+  // When "true", enables the single-store env-var fallback below. Must be
+  // explicitly set. Prevents accidental prod use of BC_STORE_HASH /
+  // BC_ACCESS_TOKEN if they're ever configured as secrets.
+  DEV_MODE?: string;
+  APP_ORIGIN?: string;
 }
 
 const STORE_KEY_PREFIX = "ask-bc:store:";
@@ -123,8 +128,13 @@ export async function resolveStoreCredentials(
     }
   }
 
-  // Dev fallback — single-store env vars
-  if (env.BC_STORE_HASH && env.BC_ACCESS_TOKEN) {
+  // Dev fallback — single-store env vars. Gated behind DEV_MODE=true AND
+  // APP_ORIGIN pointing at localhost, so a misconfigured prod deployment
+  // can never silently serve with stale fallback credentials.
+  const devModeEnabled = env.DEV_MODE === "true";
+  const localOrigin = !!env.APP_ORIGIN && (env.APP_ORIGIN.includes("localhost") || env.APP_ORIGIN.includes("127.0.0.1"));
+
+  if (devModeEnabled && localOrigin && env.BC_STORE_HASH && env.BC_ACCESS_TOKEN) {
     if (storeHash !== env.BC_STORE_HASH) {
       throw new Error(
         `Store hash mismatch: requested ${storeHash} but env has ${env.BC_STORE_HASH}`,
@@ -139,6 +149,6 @@ export async function resolveStoreCredentials(
   }
 
   throw new Error(
-    `No credentials found for store ${storeHash}. Configure UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN, or BC_STORE_HASH + BC_ACCESS_TOKEN for dev.`,
+    `No credentials found for store ${storeHash}. Configure UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN. For dev, also set DEV_MODE=true, APP_ORIGIN=http://localhost:*, BC_STORE_HASH, BC_ACCESS_TOKEN.`,
   );
 }

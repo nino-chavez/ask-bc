@@ -4,6 +4,25 @@ import { saveStoreCredentials, saveStoreUser } from '@/lib/store-credentials';
 import { registerAppExtensions } from '@/lib/bigcommerce/app-extensions';
 import { env } from '@/lib/env';
 
+// Scopes this app actually needs. If an install returns scopes outside
+// this set — especially store_v2_default (wildcard) — we log loudly so
+// the operator can tighten the BC devtools app manifest.
+const EXPECTED_SCOPES = new Set([
+  'store_v2_customers',
+  'store_v2_information',
+  'store_v2_marketing',
+  'store_v2_orders',
+  'store_v2_products',
+  'store_v2_content_read_only',
+]);
+
+function validateInstallScope(scopeString: string): { unexpected: string[]; wildcard: boolean } {
+  const granted = scopeString.split(/\s+/).filter(Boolean);
+  const wildcard = granted.includes('store_v2_default');
+  const unexpected = granted.filter((s) => s !== 'store_v2_default' && !EXPECTED_SCOPES.has(s));
+  return { unexpected, wildcard };
+}
+
 /**
  * GET /api/auth
  *
@@ -23,6 +42,20 @@ export async function GET(request: NextRequest) {
 
   try {
     const tokenData = await exchangeCodeForToken(code, context, scope);
+
+    const { unexpected, wildcard } = validateInstallScope(tokenData.scope);
+    if (wildcard) {
+      console.warn(
+        `[auth] Store ${storeHash} installed with store_v2_default (wildcard scope). ` +
+          `Reduce the scope in the BC developer portal to least-privilege.`,
+      );
+    }
+    if (unexpected.length) {
+      console.warn(
+        `[auth] Store ${storeHash} install granted unexpected scopes: ${unexpected.join(', ')}. ` +
+          `Update EXPECTED_SCOPES or tighten the app manifest.`,
+      );
+    }
 
     await saveStoreCredentials({
       storeHash,

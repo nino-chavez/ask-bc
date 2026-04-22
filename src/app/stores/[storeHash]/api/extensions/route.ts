@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authorize } from '@/lib/bigcommerce/auth';
+import { assertSameOrigin } from '@/lib/csrf';
 import { registerAppExtensions } from '@/lib/bigcommerce/app-extensions';
 import { env } from '@/lib/env';
 
@@ -10,10 +11,15 @@ import { env } from '@/lib/env';
  * Called on app load to self-heal missing extensions without reinstall.
  */
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ storeHash: string }> },
 ) {
   const { storeHash } = await params;
+
+  const csrfError = assertSameOrigin(request);
+  if (csrfError) {
+    return NextResponse.json({ error: csrfError }, { status: 403 });
+  }
 
   let session;
   try {

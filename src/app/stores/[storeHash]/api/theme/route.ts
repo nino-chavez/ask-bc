@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authorize } from '@/lib/bigcommerce/auth';
+import { assertSameOrigin } from '@/lib/csrf';
 import { getRedis } from '@/lib/redis';
 import { isValidThemeId, DEFAULT_THEME_ID } from '@/lib/themes';
 import type { ThemeId } from '@/lib/themes';
@@ -40,6 +41,11 @@ export async function PUT(
   { params }: { params: Promise<{ storeHash: string }> },
 ) {
   const { storeHash } = await params;
+
+  const csrfError = assertSameOrigin(request);
+  if (csrfError) {
+    return NextResponse.json({ error: csrfError }, { status: 403 });
+  }
 
   try {
     await authorize(storeHash);

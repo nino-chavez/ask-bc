@@ -1,6 +1,7 @@
 import { streamText, convertToModelMessages, validateUIMessages, stepCountIs } from 'ai';
 import { NextRequest, NextResponse } from 'next/server';
 import { authorize } from '@/lib/bigcommerce/auth';
+import { assertSameOrigin } from '@/lib/csrf';
 import { getModel, routeModel } from '@/lib/ai/models';
 import { createBcTools } from '@/lib/ai/tools';
 import { buildSystemPrompt } from '@/lib/ai/system-prompt';
@@ -20,6 +21,11 @@ export async function POST(
   { params }: { params: Promise<{ storeHash: string }> },
 ) {
   const { storeHash } = await params;
+
+  const csrfError = assertSameOrigin(request);
+  if (csrfError) {
+    return NextResponse.json({ error: csrfError }, { status: 403 });
+  }
 
   let session;
   try {

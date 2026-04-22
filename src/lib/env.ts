@@ -9,7 +9,10 @@ export const env = createEnv({
     APP_ORIGIN: z.string().url(),
     JWT_KEY: z.string().min(32),
     ANTHROPIC_API_KEY: z.string().min(1),
-    CREDENTIAL_ENCRYPTION_KEY: z.string().length(64).optional(),
+    // Required — AES-256-GCM key for encrypting BC access tokens at rest in
+    // Redis [S-7]. 32 bytes hex-encoded. Plaintext token storage was the
+    // fallback before; now removed. Generate with: openssl rand -hex 32
+    CREDENTIAL_ENCRYPTION_KEY: z.string().length(64),
     BIGCOMMERCE_API_URL: z.string().url().default('https://api.bigcommerce.com'),
     BIGCOMMERCE_LOGIN_URL: z.string().url().default('https://login.bigcommerce.com'),
   },

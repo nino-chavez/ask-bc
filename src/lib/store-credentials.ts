@@ -126,20 +126,16 @@ async function delKey(key: string): Promise<void> {
 }
 
 export async function saveStoreCredentials(creds: StoreCredentials): Promise<void> {
-  const encKey = getEncryptionKey();
-  if (encKey) {
-    // Encrypt the access token before storing [S-7]
-    const encrypted: EncryptedStoreCredentials = {
-      storeHash: creds.storeHash,
-      scope: creds.scope,
-      adminId: creds.adminId,
-      encryptedAccessToken: encryptToken(creds.accessToken),
-    };
-    await setKey(`${STORE_KEY_PREFIX}${creds.storeHash}`, JSON.stringify(encrypted));
-  } else {
-    // No encryption key — store plaintext (dev only)
-    await setKey(`${STORE_KEY_PREFIX}${creds.storeHash}`, JSON.stringify(creds));
-  }
+  // CREDENTIAL_ENCRYPTION_KEY is required (env schema enforces presence).
+  // No plaintext fallback — a missing/malformed key must fail closed so a
+  // prod misconfiguration can never silently persist unencrypted tokens.
+  const encrypted: EncryptedStoreCredentials = {
+    storeHash: creds.storeHash,
+    scope: creds.scope,
+    adminId: creds.adminId,
+    encryptedAccessToken: encryptToken(creds.accessToken),
+  };
+  await setKey(`${STORE_KEY_PREFIX}${creds.storeHash}`, JSON.stringify(encrypted));
 }
 
 export async function getStoreCredentials(storeHash: string): Promise<StoreCredentials | null> {
@@ -147,7 +143,10 @@ export async function getStoreCredentials(storeHash: string): Promise<StoreCrede
   if (!data) return null;
   const parsed = typeof data === 'string' ? JSON.parse(data) : data as Record<string, unknown>;
 
-  // If encrypted, decrypt the access token [S-7]
+  // Always encrypted after A13. A legacy plaintext record (pre-hardening)
+  // is a flag that something wrote credentials before encryption was
+  // mandatory — refuse to serve it so the merchant reinstalls under the
+  // new regime.
   if ('encryptedAccessToken' in parsed && typeof parsed.encryptedAccessToken === 'string') {
     return {
       storeHash: parsed.storeHash as string,
@@ -157,7 +156,9 @@ export async function getStoreCredentials(storeHash: string): Promise<StoreCrede
     };
   }
 
-  return parsed as unknown as StoreCredentials;
+  throw new Error(
+    `Store ${storeHash} has legacy plaintext credentials. Merchant must reinstall the app.`,
+  );
 }
 
 export async function deleteStoreCredentials(storeHash: string): Promise<void> {

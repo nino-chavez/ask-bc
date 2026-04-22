@@ -37,9 +37,14 @@
   }
   // Secrets set via wrangler secret put:
   //   ANTHROPIC_API_KEY         — Anthropic API key (Haiku + Sonnet)
-  //   BC_STORE_HASH             — Dev fallback: single store hash
-  //   BC_ACCESS_TOKEN           — Dev fallback: single store token
-  //   UPSTASH_REDIS_REST_URL    — Production: per-store credential lookup
-  //   UPSTASH_REDIS_REST_TOKEN  — Production: Upstash auth
-  //   CREDENTIAL_ENCRYPTION_KEY — Optional: AES-256-GCM key for encrypted tokens [S-7]
+  //   UPSTASH_REDIS_REST_URL    — Per-store credential lookup
+  //   UPSTASH_REDIS_REST_TOKEN  — Upstash auth
+  //   CREDENTIAL_ENCRYPTION_KEY — AES-256-GCM key for encrypted tokens [S-7]
+  //   JWT_KEY                   — Same secret as Vercel; verifies agent tokens [S-1]
+  //
+  // Dev-only fallback (ALL THREE required together):
+  //   DEV_MODE=true             — Explicit opt-in for env-var credentials
+  //   BC_STORE_HASH             — Single store hash
+  //   BC_ACCESS_TOKEN           — Single store access token
+  //   + APP_ORIGIN must include localhost or 127.0.0.1
 }

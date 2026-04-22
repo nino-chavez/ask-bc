@@ -10,6 +10,7 @@ import { searchBcDocs } from "./doc-search.js";
 import { resolveStoreCredentials, type StoreCredentials } from "./credentials.js";
 import { Session } from "agents/experimental/memory/session";
 import { jwtVerify } from "jose";
+import { Redis } from "@upstash/redis/cloudflare";
 
 interface Env {
   AskBC: DurableObjectNamespace;
@@ -1201,6 +1202,26 @@ export default {
             ),
             env,
           );
+        }
+
+        // Single-use enforcement: claim the jti in Redis with NX + 90s TTL
+        // so a stolen 60s token can't be replayed from a second session.
+        const jti = (payload as { jti?: string }).jti;
+        if (jti && env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN) {
+          const redis = new Redis({
+            url: env.UPSTASH_REDIS_REST_URL,
+            token: env.UPSTASH_REDIS_REST_TOKEN,
+          });
+          const claimed = await redis.set(`ask-bc:jti:${jti}`, "1", { nx: true, ex: 90 });
+          if (!claimed) {
+            return withCors(
+              new Response(JSON.stringify({ error: "Token already used" }), {
+                status: 401,
+                headers: { "content-type": "application/json" },
+              }),
+              env,
+            );
+          }
         }
       } catch {
         return withCors(

@@ -29,8 +29,12 @@ export async function GET(
     }
 
     const secret = new TextEncoder().encode(env.JWT_KEY);
-    const agentToken = await new SignJWT({ storeHash: session.storeHash })
+    const agentToken = await new SignJWT({
+      storeHash: session.storeHash,
+      userId: session.userId,
+    })
       .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+      .setJti(crypto.randomUUID())
       .setIssuedAt()
       .setExpirationTime('60s')
       .sign(secret);

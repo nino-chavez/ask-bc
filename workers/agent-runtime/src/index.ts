@@ -486,6 +486,40 @@ function buildReadTools(env: Env, bc: ReturnType<typeof createBcClients>) {
 // show the preview, then only call with confirmed=true after the
 // merchant explicitly confirms in the chat.
 
+// Map each write tool to the BC OAuth scope that permits it. If the
+// store's token doesn't carry the needed scope (and isn't wildcard),
+// the tool is filtered out of the model's tool manifest. This keeps
+// the model from even attempting writes the token can't satisfy, and
+// enforces least-privilege at the tool-registration boundary.
+const WRITE_TOOL_SCOPES: Record<string, string> = {
+  createCoupon: "store_v2_marketing",
+  deleteCoupon: "store_v2_marketing",
+  updateProductInventory: "store_v2_products",
+  setProductVisibility: "store_v2_products",
+  updateProductPrice: "store_v2_products",
+  createProduct: "store_v2_products",
+  updateOrderStatus: "store_v2_orders",
+};
+
+function hasScope(scopeString: string, required: string): boolean {
+  const scopes = scopeString.split(/\s+/);
+  return scopes.includes(required) || scopes.includes("store_v2_default");
+}
+
+function filterWriteToolsByScope<T extends Record<string, unknown>>(
+  writeTools: T,
+  scopeString: string,
+): Partial<T> {
+  const filtered: Record<string, unknown> = {};
+  for (const [name, tool] of Object.entries(writeTools)) {
+    const requiredScope = WRITE_TOOL_SCOPES[name];
+    if (!requiredScope || hasScope(scopeString, requiredScope)) {
+      filtered[name] = tool;
+    }
+  }
+  return filtered as Partial<T>;
+}
+
 function buildWriteTools(env: Env, bc: ReturnType<typeof createBcClients>, auditLog: (entry: AuditEntry) => void) {
   const u = unwrap;
 
@@ -1016,7 +1050,10 @@ export class AskBC extends Think<Env> {
 
     // Writes are top-level tools outside the sandbox with two-turn
     // confirmation pattern [S-3]. Audit log writes to DO SQLite [F-7].
-    const writeTools = buildWriteTools(this.env, bc, (entry) => this.logWrite(entry));
+    // Filter by the store's actual OAuth scope so we don't register tools
+    // the token can't satisfy.
+    const allWriteTools = buildWriteTools(this.env, bc, (entry) => this.logWrite(entry));
+    const writeTools = filterWriteToolsByScope(allWriteTools, this._credentials?.scope ?? "");
 
     // Wrap the execute tool so every sandbox invocation is audited.
     // Captures the script (truncated) and a result-size proxy. This

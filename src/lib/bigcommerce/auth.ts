@@ -65,7 +65,7 @@ export async function verifySessionToken(token: string): Promise<SessionPayload>
 // Cookie helpers
 // ---------------------------------------------------------------------------
 
-export async function getSessionCookie(storeHash: string): Promise<string | undefined> {
+export async function getSessionCookie(): Promise<string | undefined> {
   const cookieStore = await cookies();
   return cookieStore.get(SESSION_COOKIE)?.value;
 }
@@ -114,12 +114,20 @@ export async function exchangeCodeForToken(
 // ---------------------------------------------------------------------------
 
 export async function authorize(storeHash: string) {
-  const token = await getSessionCookie(storeHash);
+  const token = await getSessionCookie();
   if (!token) {
     throw new Error('No session token');
   }
 
   const session = await verifySessionToken(token);
+
+  // Defense-in-depth: cookie path scoping is the primary isolation between
+  // stores, but every caller must also enforce that the session's storeHash
+  // claim matches the URL storeHash. Without this, a cookie that somehow
+  // reaches the wrong /stores/X/ path would operate on the session's store.
+  if (session.storeHash !== storeHash) {
+    throw new Error('Store hash mismatch');
+  }
 
   const store = await getStoreCredentials(session.storeHash);
 

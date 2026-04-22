@@ -16,7 +16,7 @@ export async function GET(
 ) {
   const { storeHash } = await params;
 
-  const sessionToken = await getSessionCookie(storeHash);
+  const sessionToken = await getSessionCookie();
   if (!sessionToken) {
     return NextResponse.json({ error: 'No session' }, { status: 401 });
   }

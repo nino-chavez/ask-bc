@@ -92,7 +92,7 @@ themes:
       surface:        "#fafafa"
       background:     "#fafafa"
       userBubble:     { bg: transparent, text: "#111827", border: "#E5E7EB" }
-      assistantBubble:{ bg: transparent, text: "#111827" }
+      assistantBubble: { bg: transparent, text: "#111827" }
     typography:
       fontFamily: "system-ui, -apple-system, sans-serif"
       fontSize:   { xs: "0.75rem", sm: "0.8125rem", base: "0.9375rem", lg: "1.0625rem", xl: "1.25rem" }

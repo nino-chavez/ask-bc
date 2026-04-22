@@ -690,6 +690,7 @@ function buildWriteTools(env: Env, bc: ReturnType<typeof createBcClients>, audit
 
 interface AuditEntry {
   tool: string;
+  kind?: "read" | "write";
   input: unknown;
   result: unknown;
   timestamp: string;
@@ -963,15 +964,20 @@ export class AskBC extends Think<Env> {
   }
 
   // ─── Audit log [F-7] ─────────────────────────────────────────────
+  // Logs BOTH reads (execute-tool invocations) and writes. Read-side
+  // logging closes the dwell-time detection gap highlighted by the
+  // Vercel/Context.ai breach: stolen tokens used for quiet data
+  // exfiltration over days now leave a per-turn trail.
   private _auditTableReady = false;
 
   private ensureAuditTable() {
     if (this._auditTableReady) return;
     this.ctx.storage.sql.exec(`
-      CREATE TABLE IF NOT EXISTS write_audit (
+      CREATE TABLE IF NOT EXISTS tool_audit (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         store_hash TEXT NOT NULL,
         tool_name TEXT NOT NULL,
+        kind TEXT NOT NULL,
         input_json TEXT NOT NULL,
         result_json TEXT NOT NULL,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -980,16 +986,25 @@ export class AskBC extends Think<Env> {
     this._auditTableReady = true;
   }
 
-  logWrite(entry: AuditEntry) {
+  logTool(entry: AuditEntry) {
     this.ensureAuditTable();
     this.ctx.storage.sql.exec(
-      `INSERT INTO write_audit (store_hash, tool_name, input_json, result_json, created_at) VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO tool_audit (store_hash, tool_name, kind, input_json, result_json, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
       this.name,
       entry.tool,
+      entry.kind ?? "write",
       JSON.stringify(entry.input),
       JSON.stringify(entry.result),
       entry.timestamp,
     );
+  }
+
+  /**
+   * Back-compat shim — existing buildWriteTools() callers pass
+   * AuditEntry without the kind field; writes are the default.
+   */
+  logWrite(entry: AuditEntry) {
+    this.logTool({ ...entry, kind: "write" });
   }
 
   getTools() {
@@ -1003,12 +1018,46 @@ export class AskBC extends Think<Env> {
     // confirmation pattern [S-3]. Audit log writes to DO SQLite [F-7].
     const writeTools = buildWriteTools(this.env, bc, (entry) => this.logWrite(entry));
 
+    // Wrap the execute tool so every sandbox invocation is audited.
+    // Captures the script (truncated) and a result-size proxy. This
+    // gives us anomaly-detection material: a stolen token used for
+    // slow exfil will show up as >N execute calls / hour / store.
+    const executeTool = createExecuteTool({
+      tools: readTools,
+      loader: this.env.LOADER,
+      timeout: 30_000,
+    });
+    const originalExecute = executeTool.execute;
+    if (originalExecute) {
+      const logRead = (entry: AuditEntry) => this.logTool({ ...entry, kind: "read" });
+      executeTool.execute = (async (input: unknown, opts: unknown) => {
+        const started = Date.now();
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const result = await (originalExecute as any).call(executeTool, input, opts);
+          const scriptStr = (input as { script?: string } | undefined)?.script;
+          logRead({
+            tool: "execute",
+            input: { script: scriptStr?.slice(0, 2000), truncated: (scriptStr?.length ?? 0) > 2000 },
+            result: { bytes: JSON.stringify(result ?? null).length, durationMs: Date.now() - started },
+            timestamp: new Date().toISOString(),
+          });
+          return result;
+        } catch (err) {
+          logRead({
+            tool: "execute",
+            input: { error: true },
+            result: { error: err instanceof Error ? err.message : String(err), durationMs: Date.now() - started },
+            timestamp: new Date().toISOString(),
+          });
+          throw err;
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      }) as any;
+    }
+
     return {
-      execute: createExecuteTool({
-        tools: readTools,
-        loader: this.env.LOADER,
-        timeout: 30_000,
-      }),
+      execute: executeTool,
       ...writeTools,
     };
   }

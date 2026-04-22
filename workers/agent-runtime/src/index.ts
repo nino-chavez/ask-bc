@@ -861,6 +861,23 @@ export class AskBC extends Think<Env> {
     return this._credentials;
   }
 
+  private async enforceRateLimit(): Promise<void> {
+    if (!this.env.UPSTASH_REDIS_REST_URL || !this.env.UPSTASH_REDIS_REST_TOKEN) return;
+    const redis = new Redis({
+      url: this.env.UPSTASH_REDIS_REST_URL,
+      token: this.env.UPSTASH_REDIS_REST_TOKEN,
+    });
+    const windowIdx = Math.floor(Date.now() / 60_000);
+    const key = `ask-bc:rl:ws:${this.name}:${windowIdx}`;
+    const count = await redis.incr(key);
+    if (count === 1) {
+      await redis.expire(key, 90);
+    }
+    if (count > 30) {
+      throw new Error("Rate limit exceeded: 30 turns per 60s per store. Please wait a moment.");
+    }
+  }
+
   private getBcClients(): BcClients {
     if (!this._bcClients) {
       if (!this._credentials) {
@@ -904,6 +921,13 @@ export class AskBC extends Think<Env> {
     system: string;
   }): Promise<{ model: LanguageModel; system?: string } | void> {
     await this.ensureCredentials();
+
+    // Per-store rate limit: 30 turns / 60s fixed window. Matches the
+    // Vercel-side chat route limit. Skip on continuation turns so a
+    // multi-step in-turn retry doesn't count twice.
+    if (!ctx.continuation) {
+      await this.enforceRateLimit();
+    }
 
     // Inject entity context from the client's body param [F-4]
     const entityContext = ctx.body?.entityContext as

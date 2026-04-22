@@ -14,7 +14,13 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ storeHash: string }> },
 ) {
-  if (process.env.NODE_ENV !== 'development') {
+  // Double-gate: NODE_ENV must be development AND the app origin must be
+  // localhost. If either is false, this is a 404. Matches the Worker /smoke
+  // gate [S-5] and protects against NODE_ENV=development leaking into a
+  // remote deployment.
+  const appOrigin = process.env.APP_ORIGIN ?? '';
+  const isLocal = appOrigin.includes('localhost') || appOrigin.includes('127.0.0.1');
+  if (process.env.NODE_ENV !== 'development' || !isLocal) {
     return NextResponse.json({ error: 'Not available in production' }, { status: 404 });
   }
 

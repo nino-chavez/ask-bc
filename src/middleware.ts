@@ -43,7 +43,6 @@ export async function middleware(request: NextRequest) {
       .setExpirationTime('24h')
       .sign(new TextEncoder().encode(jwtKey));
 
-    // Determine redirect path:
     // For App Extension loads, the JWT `url` field contains the extension path
     // with ${id} already substituted by BigCommerce.
     // Normal loads have url like "https://store-xxx.mybigcommerce.com"
@@ -54,8 +53,6 @@ export async function middleware(request: NextRequest) {
       redirectPath = jwtUrl;
     }
 
-    // Also check all payload keys for any extension-related data
-    // and pass the full payload as a debug cookie (temporary)
     const response = NextResponse.redirect(new URL(redirectPath, appOrigin));
 
     response.cookies.set('session-token', sessionToken, {
@@ -65,18 +62,6 @@ export async function middleware(request: NextRequest) {
       path: `/stores/${storeHash}`,
       maxAge: 60 * 60 * 24,
       partitioned: true,
-    });
-
-    // Debug: store the payload keys in a cookie we can inspect
-    const payloadKeys = Object.keys(payload).join(',');
-    response.cookies.set('debug-payload-keys', payloadKeys, {
-      path: `/stores/${storeHash}`,
-      maxAge: 60,
-    });
-    // Store the url field specifically
-    response.cookies.set('debug-payload-url', String(jwtUrl || 'none'), {
-      path: `/stores/${storeHash}`,
-      maxAge: 60,
     });
 
     return response;

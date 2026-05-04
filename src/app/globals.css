@@ -1,3 +1,19 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Source Sans 3 is loaded via next/font/google in layout.tsx and
+   exposed as the CSS variable --font-source-sans. Apply it at body
+   level so BigDesign components (which read fontFamily from the
+   theme) inherit it correctly. The fallback chain matches BigDesign's
+   theme-declared fontFamily so behavior degrades gracefully if the
+   font CDN is unreachable. */
+body {
+  font-family:
+    var(--font-source-sans),
+    'Source Sans 3',
+    'Source Sans Pro',
+    'Helvetica Neue',
+    Arial,
+    sans-serif;
+}

@@ -44,7 +44,7 @@ For detailed architecture docs and diagrams, see [docs/architecture/README.md](d
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/Signal-x-Studio-LLC/ask-bc.git
+git clone https://github.com/nino-chavez/ask-bc.git
 cd ask-bc
 npm install
 ```

@@ -14,7 +14,7 @@ Ask BC uses three infrastructure providers:
 
 ## Vercel
 
-**Project:** `ask-bc` linked to `Signal-x-Studio-LLC/ask-bc` on GitHub.
+**Project:** `ask-bc` linked to `nino-chavez/ask-bc` on GitHub.
 
 **Deploys:** Push to `main` triggers auto-deploy. No staging environment configured.
 

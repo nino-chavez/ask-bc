@@ -15,7 +15,7 @@ Both targets share two secrets (`JWT_KEY`, `CREDENTIAL_ENCRYPTION_KEY`) that mus
 
 ### First-Time Setup
 
-1. Import the `Signal-x-Studio-LLC/ask-bc` repository to Vercel at [vercel.com/new](https://vercel.com/new)
+1. Import the `nino-chavez/ask-bc` repository to Vercel at [vercel.com/new](https://vercel.com/new)
 2. Connect the [Upstash (Vercel KV)](https://vercel.com/integrations/upstash) integration — this auto-populates `KV_REST_API_URL`, `KV_REST_API_TOKEN`, `KV_REST_API_READ_ONLY_TOKEN`, `KV_URL`, `REDIS_URL`
 3. Set the remaining environment variables in Vercel project settings:
 

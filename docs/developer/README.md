@@ -17,7 +17,7 @@ For architecture decisions behind the Worker, see [ADR-001](../architecture/deci
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/Signal-x-Studio-LLC/ask-bc.git
+git clone https://github.com/nino-chavez/ask-bc.git
 cd ask-bc
 
 # 2. Install Next.js dependencies

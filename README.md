@@ -1,6 +1,6 @@
 # Ask BC
 
-AI-powered store assistant for BigCommerce merchants.
+Production-grade agentic-AI assistant for e-commerce platforms. Hybrid Next.js (Vercel) + Cloudflare Worker + Durable Objects architecture, Haiku/Sonnet model routing, 29 commerce-API tools, generative UI rendered inline in chat, and a two-turn confirmation pattern for any mutating operation. This implementation targets BigCommerce as the integration surface.
 
 ## Features
 
@@ -98,8 +98,8 @@ npx wrangler deploy
 Set the 5 Worker secrets via `wrangler secret put`. See [docs/ops/deployment.md](docs/ops/deployment.md) for the full deployment procedure.
 
 **Live deployments:**
-- Vercel: https://ask-bc-signal-x-studio-labs.vercel.app
-- Worker: https://ask-bc-agent-runtime.biq.workers.dev
+- App: <https://askbc.ninochavez.co>
+- Worker: <https://ask-bc-agent-runtime.biq.workers.dev>
 
 ## BC App Setup
 

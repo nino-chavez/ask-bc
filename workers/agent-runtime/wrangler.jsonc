@@ -33,7 +33,7 @@
   ],
   "vars": {
     "BC_API_BASE": "https://api.bigcommerce.com",
-    "APP_ORIGIN": "https://ask-bc.vercel.app"
+    "APP_ORIGIN": "https://askbc.ninochavez.co"
   }
   // Secrets set via wrangler secret put:
   //   ANTHROPIC_API_KEY         — Anthropic API key (Haiku + Sonnet)

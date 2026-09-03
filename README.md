@@ -1,6 +1,27 @@
 # Ask BC
 
-Production-grade agentic-AI assistant for e-commerce platforms. This implementation targets BigCommerce as the integration surface — see the Tech Stack table below for the full architecture.
+AI store assistant for BigCommerce merchants. Ask about orders, products, and customers, and get answers rendered as live UI instead of plain text. Write operations preview before they execute — no blind writes.
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Next.js 15](https://img.shields.io/badge/Next.js-15-black.svg)](https://nextjs.org)
+[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-orange.svg)](https://workers.cloudflare.com)
+[![BigCommerce](https://img.shields.io/badge/BigCommerce-App-1992F1.svg)](https://www.bigcommerce.com)
+
+<img src="scripts/demo-reel/screenshots/demo-02-kpi.png" alt="Ask BC chat panel in the BigCommerce admin, showing a KPI card grid for products, customers, orders, and revenue" width="820">
+
+*Demo store data — 119 products, 127 customers, seeded via [gen-commerce-store-data](https://github.com/nino-chavez/gen-commerce-store-data), not a real merchant.*
+
+This implementation targets BigCommerce as the integration surface — see [Tech Stack](#tech-stack) for the full architecture.
+
+## Contents
+
+- [Features](#features)
+- [Tech Stack](#tech-stack)
+- [Architecture](#architecture)
+- [Quick Start](#quick-start)
+- [Deploy](#deploy)
+- [BC App Setup](#bc-app-setup)
+- [License](#license)
 
 ## Features
 
@@ -114,4 +135,4 @@ After deploying, configure your app in the [BC Developer Portal](https://devtool
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).

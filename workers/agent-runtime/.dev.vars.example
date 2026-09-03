@@ -1,0 +1,14 @@
+# Worker dev secrets — cp .dev.vars.example .dev.vars and fill in.
+# .dev.vars is gitignored; wrangler dev loads it automatically.
+
+ANTHROPIC_API_KEY=
+UPSTASH_REDIS_REST_URL=
+UPSTASH_REDIS_REST_TOKEN=
+CREDENTIAL_ENCRYPTION_KEY=
+JWT_KEY=
+
+# Dev-only single-store fallback (all three required together, and
+# APP_ORIGIN must include localhost/127.0.0.1 — see wrangler.jsonc):
+# DEV_MODE=true
+# BC_STORE_HASH=
+# BC_ACCESS_TOKEN=

@@ -1,6 +1,6 @@
 # Ask BC
 
-Production-grade agentic-AI assistant for e-commerce platforms. Hybrid Next.js (Vercel) + Cloudflare Worker + Durable Objects architecture, Haiku/Sonnet model routing, 29 commerce-API tools, generative UI rendered inline in chat, and a two-turn confirmation pattern for any mutating operation. This implementation targets BigCommerce as the integration surface.
+Production-grade agentic-AI assistant for e-commerce platforms. This implementation targets BigCommerce as the integration surface — see the Tech Stack table below for the full architecture.
 
 ## Features
 

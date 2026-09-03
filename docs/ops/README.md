@@ -13,7 +13,7 @@ Ask BC runs as a hybrid: a Next.js app on Vercel and a Cloudflare Worker. Both t
 
 | Service | Provider | URL | Deploys via |
 |---------|----------|-----|-------------|
-| Next.js app | Vercel | https://ask-bc-signal-x-studio-labs.vercel.app | GitHub push to `main` |
+| Next.js app | Vercel | https://askbc.ninochavez.co | GitHub push to `main` |
 | Agent Worker | Cloudflare | https://ask-bc-agent-runtime.biq.workers.dev | `wrangler deploy` (manual) |
 | Credentials store | Upstash Redis | Shared between both | Vercel KV integration |
 
@@ -22,7 +22,7 @@ Ask BC runs as a hybrid: a Next.js app on Vercel and a Cloudflare Worker. Both t
 | Check | Command |
 |-------|---------|
 | Worker health | `curl https://ask-bc-agent-runtime.biq.workers.dev/health` |
-| Vercel app | Load `https://ask-bc-signal-x-studio-labs.vercel.app` — expect 302 redirect to BC auth |
+| Vercel app | Load `https://askbc.ninochavez.co` — expect 302 redirect to BC auth |
 
 ## On-Call Reference
 

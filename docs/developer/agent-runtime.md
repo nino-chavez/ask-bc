@@ -236,7 +236,7 @@ async beforeTurn(ctx: { continuation: boolean; body?: Record<string, unknown>; s
 
 **Production URLs:**
 - Worker: `https://ask-bc-agent-runtime.biq.workers.dev`
-- Vercel: `https://ask-bc-signal-x-studio-labs.vercel.app`
+- Vercel: `https://askbc.ninochavez.co`
 
 **Deploy the Worker:**
 

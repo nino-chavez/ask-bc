@@ -23,7 +23,7 @@ Both targets share two secrets (`JWT_KEY`, `CREDENTIAL_ENCRYPTION_KEY`) that mus
 |----------|-------|
 | `BIGCOMMERCE_CLIENT_ID` | From BC Developer Portal |
 | `BIGCOMMERCE_CLIENT_SECRET` | From BC Developer Portal |
-| `APP_ORIGIN` | Your Vercel deployment URL (e.g., `https://ask-bc-signal-x-studio-labs.vercel.app`) — no trailing slash |
+| `APP_ORIGIN` | Your Vercel deployment URL (e.g., `https://askbc.ninochavez.co`) — no trailing slash |
 | `JWT_KEY` | `openssl rand -hex 32` — save this value, it must match the Worker |
 | `CREDENTIAL_ENCRYPTION_KEY` | `openssl rand -hex 32` — save this value, it must match the Worker |
 | `ANTHROPIC_API_KEY` | From Anthropic Console |
@@ -46,10 +46,10 @@ In the [BC Developer Portal](https://devtools.bigcommerce.com/my/apps), set:
 
 | Callback | URL |
 |----------|-----|
-| Auth | `https://ask-bc-signal-x-studio-labs.vercel.app/api/auth` |
-| Load | `https://ask-bc-signal-x-studio-labs.vercel.app/api/load` |
-| Uninstall | `https://ask-bc-signal-x-studio-labs.vercel.app/api/uninstall` |
-| Remove User | `https://ask-bc-signal-x-studio-labs.vercel.app/api/remove-user` |
+| Auth | `https://askbc.ninochavez.co/api/auth` |
+| Load | `https://askbc.ninochavez.co/api/load` |
+| Uninstall | `https://askbc.ninochavez.co/api/uninstall` |
+| Remove User | `https://askbc.ninochavez.co/api/remove-user` |
 
 ---
 

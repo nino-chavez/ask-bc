@@ -59,7 +59,7 @@ The four `KV_*` / `REDIS_URL` vars are automatically populated by the Vercel KV 
 | `AskBC` | Durable Object | One DO instance per store (`idFromName(storeHash)`). Holds session state and the SQLite write audit log. Uses `new_sqlite_classes` migration. |
 | `LOADER` | Worker Loader | Provides the Codemode Dynamic Worker execution environment. Registered in `worker_loaders`. |
 | `BC_API_BASE` | Var | `https://api.bigcommerce.com` — BC REST API base URL |
-| `APP_ORIGIN` | Var | `https://ask-bc-signal-x-studio-labs.vercel.app` — used for CORS |
+| `APP_ORIGIN` | Var | `https://askbc.ninochavez.co` — used for CORS |
 
 ### Secrets (5)
 

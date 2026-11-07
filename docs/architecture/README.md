@@ -9,6 +9,7 @@ Ask BC is a **hybrid architecture**: the agent runtime runs on a Cloudflare Work
 Related references:
 - [ADR-001: Codemode Agent Runtime on Cloudflare](./decisions/001-codemode-agent-runtime.md) — architectural decision, gap analysis, alternatives, consequences
 - [Developer guide: `workers/agent-runtime/`](../developer/agent-runtime.md) — operational reference, running locally, known gotchas, phase history
+- [Agent reference architecture](./reference/README.md) — the domain-neutral version of this design, for building the same kind of agent on a different platform or data set
 
 ## System Metaphor
 

@@ -36,11 +36,12 @@ interface Env {
 // Architecture: READ TOOLS go inside the codemode sandbox so the model
 // can chain them in a single generated script with Promise.all, joins,
 // and in-memory aggregation. WRITE TOOLS are TOP-LEVEL tools the model
-// calls directly, each with `needsApproval: true` so the AI SDK's
-// approval protocol pauses execution until the user clicks Execute in
-// the chat UI. The sandbox never sees write tools, so the model
-// literally cannot write from inside codemode — all mutations flow
-// through the explicit approval gate.
+// calls directly, using the two-turn `confirmed` pattern below. That
+// gate is prompt-enforced: the model sets `confirmed` itself, so no host
+// check blocks a first-call `confirmed: true`. The sandbox never sees
+// write tools, so the model cannot write from inside codemode. See
+// docs/architecture/reference/decisions.md D-4 for the host-enforced
+// target.
 
 // Tiny helper: unwrap openapi-fetch's {data, error} tuple into either
 // the data or a thrown error with the spec path for debuggability.

@@ -43,5 +43,10 @@
     "tailwindcss": "3.4.19",
     "typescript": "5.9.3",
     "wrangler": "4.83.0"
+  },
+  "overrides": {
+    "@vercel/fun": {
+      "tar": "7.5.23"
+    }
   }
 }
